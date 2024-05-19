@@ -36,11 +36,11 @@ def main(cfg: DictConfig) -> int:
         trainer.setup_platform()
         trainer.setup_trainer()
         if cfg.trainer.qualitative_experiment:
-            try:
-                trainer.run_qualitative_experiments()
-            except Exception as e:
-                LOG.error(f"Stopped with the following error : {e}")
-                time.sleep(2)
+            # try:
+            trainer.run_qualitative_experiments()
+            # except Exception as e:
+            #     LOG.error(f"Stopped with the following error : {e}")
+            #     time.sleep(2)
         else:
             trainer.run_experiments()
         return 0
