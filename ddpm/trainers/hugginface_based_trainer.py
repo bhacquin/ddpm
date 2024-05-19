@@ -144,7 +144,7 @@ class Hugginface_Trainer(BaseTrainer):
         return min(step, self.cfg.trainer.warmup) / self.cfg.trainer.warmup
 
     def setup_trainer(self) -> None:
-        print("directory_setup0", os.getcwd())
+        # print("directory_setup", os.getcwd())
         LOG.info(f"{self.cfg.trainer.name}: {self.cfg.trainer.rank}, gpu: {self.cfg.trainer.gpu}")
         warnings.simplefilter(action='ignore', category=FutureWarning)
         os.makedirs(os.path.join(self.cfg.trainer.logdir, 'sample'), exist_ok=True)
@@ -219,23 +219,23 @@ class Hugginface_Trainer(BaseTrainer):
         """
     
 
-    def _clip_inputs(self, sample: torch.FloatTensor, t : int, number_of_stds: float = 2.):
-        """
-        Cliping the inputs with an confidence interval given by the diffusion schedule
-        """
-        dtype = sample.dtype
-        batch_size, channels, *remaining_dims = sample.shape
+    # def _clip_inputs(self, sample: torch.FloatTensor, t : int, number_of_stds: float = 2.):
+    #     """
+    #     Cliping the inputs with an confidence interval given by the diffusion schedule
+    #     """
+    #     dtype = sample.dtype
+    #     batch_size, channels, *remaining_dims = sample.shape
 
-        if dtype not in (torch.float32, torch.float64):
-            sample = sample.float()  # upcast for quantile calculation, and clamp not implemented for cpu half
-        alpha_t = self.alphas_cumprod[t]
-        sqrt_alpha_t = torch.sqrt(alpha_t).item()
-        one_minus_sqrt_alpha_t = torch.sqrt(1-alpha_t).item()
-        confidence_interval = [-sqrt_alpha_t - number_of_stds * one_minus_sqrt_alpha_t,sqrt_alpha_t + number_of_stds * one_minus_sqrt_alpha_t]
-        sample = torch.clamp(sample, confidence_interval[0], confidence_interval[1])
-        sample = sample.to(dtype)
+    #     if dtype not in (torch.float32, torch.float64):
+    #         sample = sample.float()  # upcast for quantile calculation, and clamp not implemented for cpu half
+    #     alpha_t = self.alphas_cumprod[t]
+    #     sqrt_alpha_t = torch.sqrt(alpha_t).item()
+    #     one_minus_sqrt_alpha_t = torch.sqrt(1-alpha_t).item()
+    #     confidence_interval = [-sqrt_alpha_t - number_of_stds * one_minus_sqrt_alpha_t,sqrt_alpha_t + number_of_stds * one_minus_sqrt_alpha_t]
+    #     sample = torch.clamp(sample, confidence_interval[0], confidence_interval[1])
+    #     sample = sample.to(dtype)
 
-        return sample
+    #     return sample
 
 
     def _threshold_sample(self, sample: torch.FloatTensor, dynamic_thresholding_ratio: float, sample_max_value : float = 5/3) -> torch.FloatTensor:
@@ -272,13 +272,49 @@ class Hugginface_Trainer(BaseTrainer):
 
 
     @torch.no_grad()
+    def _clip_inputs(self, sample: torch.FloatTensor, t : int, number_of_stds: float = 2., original_img = None, previous_x = None):
+        """
+        Cliping the inputs with an confidence interval given by the diffusion schedule
+        """
+        dtype = sample.dtype
+        batch_size, channels, *remaining_dims = sample.shape
+        if dtype not in (torch.float32, torch.float64):
+            sample = sample.float()  # upcast for quantile calculation, and clamp not implemented for cpu half
+        alphas_cumprod = self.ddpm.scheduler.alphas_cumprod
+        alphas = self.ddpm.scheduler.alphas
+        alpha_t = self.ddpm.scheduler.alphas_cumprod[t]
+        sqrt_alpha_local_t = torch.sqrt(alphas[t])
+        one_minus_alphas_local_t = torch.sqrt(1-alphas[t]).item()
+        sqrt_alpha_t = torch.sqrt(alpha_t).item()
+        one_minus_sqrt_alpha_t = torch.sqrt(1-alpha_t).item()
+        if original_img is not None and previous_x is not None and t > 0:
+            mean = original_img * torch.sqrt(alphas_cumprod[t-1]).item() * (betas[t]).item() / (1 - alphas[t].item())
+            mean += previous_x * torch.sqrt(alphas[t]).item() * (1 - alphas_cumprod[t-1].item()) / (1-alphas_cumprod[t].item())
+            plt.imshow(mean[0].permute(1,2,0).cpu()/2+0.5)
+            plt.show()
+            std = betas[t].item() * (1-alphas_cumprod[t-1].item())/(1-alphas_cumprod[t].item())
+            confidence_interval = [mean - number_of_stds * std, mean + number_of_stds * std]
+        elif original_img is None:
+            confidence_interval = [-sqrt_alpha_t - number_of_stds * one_minus_sqrt_alpha_t, sqrt_alpha_t + number_of_stds * one_minus_sqrt_alpha_t]
+        else:
+            confidence_interval = [sqrt_alpha_t * original_img - number_of_stds * one_minus_sqrt_alpha_t, 
+                                sqrt_alpha_t * original_img + number_of_stds * one_minus_sqrt_alpha_t]
+        sample = torch.clamp(sample, confidence_interval[0], confidence_interval[1])
+        sample = sample.to(dtype)
+        return sample
+
+
+    @torch.no_grad()
     def langevin_sampling(self, inputs, t, t_prev, steps = 100, epsilon = 1e-5,min_variance = -1, 
                          denoising_step = True, clip_prev = False, clip_now = False, dynamic_thresholding = False,  power  = 0.5):
 
-
+        
         alphas_cumprod = self.ddpm.scheduler.alphas_cumprod.cpu().numpy()
         model = self.ddpm.unet
         index = t
+        timesteps = ddpm.scheduler.timesteps.tolist()[::-1]
+        t = timesteps[index]
+        # index = t
         t = torch.tensor([t] * inputs.shape[0]).cuda(self.cfg.trainer.gpu)   
         mean_coef_t = torch.sqrt(_extract_into_tensor(alphas_cumprod, t , inputs.shape))
         variance = _extract_into_tensor(1.0 - alphas_cumprod, t , inputs.shape)
@@ -290,7 +326,7 @@ class Hugginface_Trainer(BaseTrainer):
             mean_coef_t_prev = torch.sqrt(_extract_into_tensor(alphas_cumprod, t_prev , inputs.shape))
             variance_t_prev = _extract_into_tensor(1.0 - alphas_cumprod, t_prev , inputs.shape)
             std_prev = torch.sqrt(variance_t_prev)
-            if self.cfg.trainer.clip_inputs:
+            if self.cfg.trainer.clip_inputs_langevin and (index > self.cfg.trainer.stop_clipping_at):
                 inputs = self._clip_inputs(inputs, t = index, number_of_stds = self.cfg.trainer.number_of_stds)
             noise_estimate_t_prev = self.model(inputs, t_prev)['sample']
             x0_t_1 = (inputs - std_prev * noise_estimate_t_prev)/mean_coef_t_prev
@@ -306,7 +342,7 @@ class Hugginface_Trainer(BaseTrainer):
             alpha_coef = torch.ones_like(variance) * epsilon
         with torch.no_grad():
             for i in range(steps):
-                if self.cfg.trainer.clip_inputs:
+                if self.cfg.trainer.clip_inputs_langevin and (index > self.cfg.trainer.stop_clipping_at):
                     inputs = self._clip_inputs(inputs, t = index, number_of_stds = self.cfg.trainer.number_of_stds)
                 noise_estimate = self.model(inputs, t)['sample']
                 if dynamic_thresholding:
@@ -324,7 +360,7 @@ class Hugginface_Trainer(BaseTrainer):
                 if steps > 1:
                     inputs = (inputs + alpha_coef * score) + torch.pow(2*alpha_coef, power) * noise
             if denoising_step:
-                if self.cfg.trainer.clip_inputs:
+                if self.cfg.trainer.clip_inputs_langevin and (index > self.cfg.trainer.stop_clipping_at):
                     inputs = self._clip_inputs(inputs, t = index, number_of_stds = self.cfg.trainer.number_of_stds)
                 noise_estimate = self.model(inputs, t)['sample']
                 score = - noise_estimate / std
@@ -334,37 +370,45 @@ class Hugginface_Trainer(BaseTrainer):
 
     @torch.no_grad()
     def ddim_step(self, inputs, t, clip_denoised = False, dynamic_thresholding = True, clip_value = 1, sigma = 0, 
+                clip_inputs = False, number_of_stds = 2, stop_clipping_at = 0, prev_pred = None, previous_x = None,
                 forward = True, number_of_sample = 1):
         alphas_cumprod = self.alphas_cumprod.cpu().numpy()
         number_of_timesteps = self.ddpm.scheduler.betas.shape[0]
         index = t
-        # model = self.model.cuda(self.cfg.trainer.gpu)
-        # inputs = inputs.cuda(self.cfg.trainer.gpu)
-        if t > 0 and forward:
-            t_prev = torch.tensor([t-1] * inputs.shape[0]).cuda(self.cfg.trainer.gpu)
+        timesteps = self.ddpm.scheduler.timesteps.tolist()[::-1]
+        t = timesteps[index]
+
+        if index > 0 and forward:
+            t_prev = timesteps[index-1]
+            t_prev = torch.tensor([t_prev] * inputs.shape[0]).cuda(self.cfg.trainer.gpu)
             variance_prev = _extract_into_tensor(1.0 - alphas_cumprod, t_prev , inputs.shape)
             std_prev = torch.sqrt(variance_prev)
-        elif t < number_of_timesteps :
-            t_prev = torch.tensor([t+1] * inputs.shape[0]).cuda(self.cfg.trainer.gpu)
+        elif index < number_of_timesteps :
+            t_prev = timesteps[index+1]
+            t_prev = torch.tensor([t_prev] * inputs.shape[0]).cuda(self.cfg.trainer.gpu)
             variance_prev = _extract_into_tensor(1.0 - alphas_cumprod, t_prev , inputs.shape)
             std_prev = torch.sqrt(variance_prev)
         t = torch.tensor([t] * inputs.shape[0]).cuda(self.cfg.trainer.gpu)
         variance = _extract_into_tensor(1.0 - alphas_cumprod, t , inputs.shape)
         mean_coef_t = torch.sqrt(_extract_into_tensor(alphas_cumprod, t , inputs.shape))
         std = torch.sqrt(variance)
-        if self.cfg.trainer.clip_inputs:
-            inputs = self._clip_inputs(inputs, t = index, number_of_stds = self.cfg.trainer.number_of_stds)
+        if clip_inputs:
+            if index > stop_clipping_at:
+                if forward:
+                    inputs = self._clip_inputs(inputs, t = index, number_of_stds = self.cfg.trainer.number_of_stds, original_img = prev_pred, previous_x = previous_x)
+                else:
+                    inputs = _clip_inputs(inputs, t = index, number_of_stds = self.cfg.trainer.number_of_stds, original_img = prev_pred, previous_x = None)
+
         noise_estimate = self.model(inputs, t)['sample']
         std_epsilon = noise_estimate[0].cpu().std().item()
         mean_epsilon = noise_estimate[0].cpu().mean().item()
+        x0_t = (inputs - std * noise_estimate)/mean_coef_t
         if dynamic_thresholding:
-            x0_t = (inputs - std * noise_estimate)/mean_coef_t
             x0_t = self._threshold_sample(x0_t, self.dynamic_threshol_ratio, self.dynamic_threshold_max)
             noise_estimate = (inputs - mean_coef_t * x0_t) / std
             std_epsilon = noise_estimate[0].cpu().std().item()
             mean_epsilon = noise_estimate[0].cpu().mean().item()
         elif clip_denoised:
-            x0_t = (inputs - std * noise_estimate)/mean_coef_t
             x0_t = x0_t.clamp(-1,1)
             noise_estimate = (inputs - mean_coef_t * x0_t) / std
             std_epsilon = noise_estimate[0].cpu().std().item()
@@ -375,7 +419,7 @@ class Hugginface_Trainer(BaseTrainer):
             sigma_t = 0.
         noise= torch.randn_like(inputs)
         x_prev = torch.sqrt(1-variance_prev) / torch.sqrt(1-variance) * ((inputs - std * noise_estimate)) + torch.sqrt(variance_prev - sigma_t**2)  * noise_estimate + sigma_t * noise
-        return x_prev, std_epsilon, mean_epsilon
+        return x_prev, std_epsilon, mean_epsilon, x0_t
 
 
     def corrupt(self, image = None, number = 9999,corruption = 'spatter', random_sampling = False, random_corruption = False):
@@ -420,34 +464,33 @@ class Hugginface_Trainer(BaseTrainer):
         return img_tensor, original
 
 
-    def editing_with_ode(self, latent_codes, model, t_start = 1000, std_div = -1., annealing = False,annealing_cst = 0.8, epsilon = 1e-8, 
+    def editing_with_ode(self, latent_codes, t_start = 1000, annealing = False,
+                        annealing_cst = 0.8, epsilon = 1e-8, 
                         steps = 20, power =0.5, min_latent_space_update = 99, 
-                        min_variance = -1. , number_of_sample = 1,normalize=False, normalize_mean = False,
+                        min_variance = -1. , number_of_sample = 1,
                         corrector_step = 1, use_std_schedule = False):
         
         alphas_cumprod = self.ddpm.scheduler.alphas_cumprod
+        timesteps = ddpm.scheduler.timesteps.tolist()
         stds = torch.sqrt(1-alphas_cumprod)
+
         list_of_evolution_reverse = []
         final_samples = []
-        t_valid = list(range(0, min(len(latent_codes)+1,t_start)))
+        t_valid = list(range(0, min(len(latent_codes)+1,len(timesteps))))
+        model = self.model
+        t_start = min(t_start, min(len(latent_codes)+1,len(timesteps)))
 
         if t_start > min_latent_space_update + corrector_step and corrector_step > 1:
-            correction_latents = np.linspace(min_latent_space_update, np.max(t_valid), corrector_step).astype(int).tolist()
-            epsilon_correction = np.geomspace(1,300,1000)[::-1]
+            correction_latents = np.linspace(min_latent_space_update, t_start, corrector_step).astype(int).tolist()
+            epsilon_correction = np.geomspace(1,300,len(timesteps))[::-1]
             if use_std_schedule:
                 epsilon_correction = 1 / stds.cpu().numpy()
-            epsilon_correction = epsilon_correction / epsilon_correction[np.max(t_valid)]
+            epsilon_correction = epsilon_correction / epsilon_correction[len(timesteps)-1]
         else:
+            correction_latents = [t_start]
 
-            correction_latents = [np.max(t_valid)]
-        # print(f"correction_latents {correction_latents}")
         with torch.no_grad():
-            if self.cfg.trainer.normalize and np.max(t_valid) == len(latent_codes) - 1:
-                inputs = (latent_codes[np.max(t_valid)] - latent_codes[np.max(t_valid)].mean([1,2,3],keepdim=True))/latent_codes[np.max(t_valid)].std([1,2,3], keepdim=True)
-            elif self.cfg.trainer.normalize_mean and np.max(t_valid) == len(latent_codes) - 1:
-                inputs = (latent_codes[np.max(t_valid)] - latent_codes[np.max(t_valid)].mean())
-            else:
-                inputs = latent_codes[np.max(t_valid)]
+            inputs = latent_codes[t_start]
             if len(inputs.shape) == 3:
                 inputs = inputs.unsqueeze(0)
                 batch_size = 1
@@ -455,7 +498,7 @@ class Hugginface_Trainer(BaseTrainer):
                 batch_size = inputs.shape[0]
             else:
                 raise NotImplementedError
-
+            # Make sure samples are next to one another in the grid
             if batch_size > 1 and number_of_sample > 1:
                 inputs = inputs.split(1, dim=0)
                 inputs = [inp.repeat(number_of_sample, 1, 1, 1) for inp in inputs]
@@ -464,60 +507,47 @@ class Hugginface_Trainer(BaseTrainer):
                 inputs = inputs.repeat(number_of_sample, 1, 1, 1)
             else:
                 inputs = inputs
-
             inputs = inputs.cuda(self.cfg.trainer.gpu)
 
-            if True:
-                for t in tqdm(t_valid[::-1]):
-                    counter = 0
-                    if std_div > 0:
-                        LOG.info(f"STD useage deprecated.")
+            # for t in tqdm(t_valid[::-1]):
+            if start_from_latent:
+                t_valid = t_valid[::-1]
+            else:
+                t_valid = range(t_start)[::-1]
+            for t in tqdm(t_valid):
+                if t in correction_latents:
+                    if annealing>1:
+                        new_epsilon = epsilon
+                        step_per_epsilon = steps // len(range(int(annealing))) 
+                        for j in range(int(annealing)):
+                            LOG.info(f"Orignal Epsilon : {epsilon}, Update_{j}_epsilon : {new_epsilon}")
+                            inputs, alpha_coef, _, _ = self.langevin_sampling(inputs, t, None, steps = step_per_epsilon, epsilon = new_epsilon,
+                                                min_variance = min_variance, clip_prev = False, clip_now = False,
+                                                dynamic_thresholding=self.cfg.trainer.dynamic_thresholding_langevin, power = power)
+                            new_epsilon  = new_epsilon * annealing_cst
                             
-                    elif t == np.max(t_valid):
-                        before = inputs.cpu()
-                        if annealing>1:
-                            new_epsilon = epsilon
-                            step_per_epsilon = steps // len(range(int(annealing))) 
-                            for j in range(int(annealing)):
-                                LOG.info(f"Orignal Epsilon : {epsilon}, Update_{j}_epsilon : {new_epsilon}")
-                                inputs, alpha_coef, _, _ = self.langevin_sampling(inputs, t, None, steps = step_per_epsilon, epsilon = new_epsilon,
-                                                    min_variance = min_variance, clip_prev = False, clip_now = False,dynamic_thresholding=self.cfg.trainer.dynamic_thresholding_langevin,power = power)
-                                new_epsilon  = new_epsilon * annealing_cst
-                                
-   
-                        else:
-                            inputs,alpha_coef, _, _ = self.langevin_sampling(inputs, t, None, steps = steps, epsilon = epsilon,
-                                    min_variance = min_variance, clip_prev = False, clip_now = False,dynamic_thresholding=self.cfg.trainer.dynamic_thresholding_langevin, power = power)  
-                        
-                        for h in range(len(inputs)):
-                                list_of_evolution_reverse.append(inputs[h].cpu())
-
-                    elif t in correction_latents:
-                        before = inputs.cpu()
-                        new_epsilon = epsilon * epsilon_correction[t]
-                        LOG.info(f'At latent {t} epsilon becomes {new_epsilon}, epsilon was {epsilon} originally.')
-                        if annealing>1:
-                            step_per_epsilon = steps // len(range(int(annealing)))
-                            for j in range(int(annealing)):
-                                LOG.info(f"Orignal Epsilon : {epsilon}, Update_{j}_epsilon : {new_epsilon}")
-                                inputs,alpha_coef, list_of_stds, list_of_means = self.langevin_sampling(inputs, t, None, steps = step_per_epsilon, epsilon = new_epsilon,
-                                                    min_variance = min_variance, clip_prev = False, clip_now = False,dynamic_thresholding=self.cfg.trainer.dynamic_thresholding_langevin,power = power)
-                                new_epsilon  = new_epsilon * annealing_cst
-                                
-                        else:
-                            inputs,alpha_coef, _, _ = self.langevin_sampling(inputs, t, None, steps = steps, epsilon = new_epsilon,
-                                    min_variance = min_variance, clip_prev = False, clip_now = False,dynamic_thresholding=self.cfg.trainer.dynamic_thresholding_langevin, power = power)  
-                        
-                        for h in range(len(inputs)):
-                                list_of_evolution_reverse.append(inputs[h].cpu())
-
-                    inputs, _, _ = self.ddim_step(inputs, t, sigma = 0.,
-                                                            clip_denoised=False,dynamic_thresholding=self.cfg.trainer.dynamic_thresholding_ddim, forward=True, number_of_sample = number_of_sample)               
+                    else:
+                        inputs,alpha_coef, _, _ = self.langevin_sampling(inputs, t, None, steps = steps, epsilon = epsilon,
+                                min_variance = min_variance, clip_prev = False, clip_now = False,
+                                dynamic_thresholding=self.cfg.trainer.dynamic_thresholding_langevin, power = power)  
                     
                     for h in range(len(inputs)):
-                        list_of_evolution_reverse.append(inputs[h].cpu())
-                for sample in list_of_evolution_reverse[-batch_size*number_of_sample:]:
-                    final_samples.append(sample)
+                            list_of_evolution_reverse.append(inputs[h].cpu())
+
+
+                # inputs, _, _ = self.ddim_step(inputs, t, sigma = 0.,
+                #                                         clip_denoised=False,dynamic_thresholding=self.cfg.trainer.dynamic_thresholding_ddim, forward=True, 
+                #                                         number_of_sample = number_of_sample)   
+                inputs, _, _, _ = self.ddim_step(inputs, t, clip_denoised = False, dynamic_thresholding = self.cfg.trainer.dynamic_thresholding_ddim, 
+                                                            clip_value = 1, sigma = 0, 
+                                                            clip_inputs = self.cfg.trainer.clip_input_decoding, stop_clipping_at = self.cfg.trainer.stop_clipping_at, 
+                                                            prev_pred = None, previous_x = None,
+                                                            forward = True, number_of_sample = number_of_sample)            
+                
+                for h in range(len(inputs)):
+                    list_of_evolution_reverse.append(inputs[h].cpu())
+            for sample in list_of_evolution_reverse[-batch_size*number_of_sample:]:
+                final_samples.append(sample)
                     
             for h in range(len(inputs)):
                 list_of_evolution_reverse.append(inputs[h].cpu())
@@ -525,7 +555,7 @@ class Hugginface_Trainer(BaseTrainer):
 
 
     @torch.no_grad()
-    def encode_inputs(self, inputs, noisified = True): 
+    def encode_inputs(self, inputs, noisified = True, clip_input = False): 
         latent_codes = []
         list_std_encoding = []
         list_mean_encoding = []
@@ -534,7 +564,12 @@ class Hugginface_Trainer(BaseTrainer):
         with torch.no_grad():
             latent_codes.append(inputs.cpu())
             for t in range(0,self.ddpm.scheduler.betas.shape[0]-1):
-                inputs, std_eps, mean_eps = self.ddim_step(inputs, t,  sigma = 0.,clip_denoised=False,dynamic_thresholding = self.cfg.trainer.dynamic_thresholding_ddim, forward=False)
+                # inputs, std_eps, mean_eps = self.ddim_step(inputs, t,  sigma = 0.,
+                # clip_denoised=False,dynamic_thresholding = self.cfg.trainer.dynamic_thresholding_ddim, forward=False)
+                inputs std_eps, mean_eps, x0_t = ddim_step(inputs, t, sigma = 0.,
+                                        clip_denoised=False,dynamic_thresholding=self.cfg.trainer.dynamic_thresholding_ddim,  forward=False, 
+                                        clip_inputs = self.cfg.trainer.clip_input_encoding, clip_epsilon=False,  
+                                        number_of_stds = self.cfg.trainer.number_of_stds ,prev_pred = None)
                 latent_codes.append(inputs.cpu())
                 list_std_encoding.append(std_eps)
                 list_mean_encoding.append(mean_eps)
@@ -647,7 +682,13 @@ class Hugginface_Trainer(BaseTrainer):
                         img_tensor, original, corruptions_order = self.batch_for_single_image_experiments(img_batch, number = k)
                     else:
                         k = self.cfg.trainer.image_number
-                        img_tensor, original, corruptions_order = self.batch_for_single_image_experiments(None, number = k)
+                        try:
+                            img_batch = self.train_dataset[k][1]
+                            indexes = torch.ones_like(img_batch) * k
+                        except Exception as e:
+                            print(f"Loading dataset index directly failed with {e}")
+                            img_batch = None
+                        img_tensor, original, corruptions_order = self.batch_for_single_image_experiments(img_batch, number = k)
                     img_tensor = img_tensor.cuda(self.cfg.trainer.gpu)
                     original = original.cuda(self.cfg.trainer.gpu)
                     index_directory = []

@@ -55,8 +55,12 @@ dynamic_thresholding_ddim: true
 dynamic_threshol_ratio: 0.98
 dynamic_threshold_max: 1.3
 number_of_latents_corrected: 2
+number_of_stds: 2
+clip_input_decoding: false
+clip_input_encoding: false
+stop_clipping_at: 0
 min_latent_space_update: 199
-ode_range: [999, 1000, 2]
+ode_range: [999, 1000, 1]
 sde_range: [199,500,100]
 # Logging & Sampling
 number_of_steps: 1000
