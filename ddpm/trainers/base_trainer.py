@@ -98,13 +98,23 @@ def init_local_distributed_mode(cfg: DictConfig) -> DictConfig:
             sys.exit(1)
 
     # LOG.info(f'Init process group: {cfg.trainer}')
-    dist.init_process_group(
-        backend="nccl",
-        init_method="env://",
-        world_size=cfg.trainer.world_size,
-        timeout=datetime.timedelta(seconds=1800),
-        rank=cfg.trainer.rank,
-    )
+    try:
+        dist.init_process_group(
+            backend="nccl",
+            init_method="env://",
+            world_size=cfg.trainer.world_size,
+            timeout=datetime.timedelta(seconds=1800),
+            rank=cfg.trainer.rank,
+        )
+    except:
+        os.environ["MASTER_PORT"] = "29401"
+        dist.init_process_group(
+            backend="nccl",
+            init_method="env://",
+            world_size=cfg.trainer.world_size,
+            timeout=datetime.timedelta(seconds=1800),
+            rank=cfg.trainer.rank,
+        )
 
     torch.cuda.set_device(cfg.trainer.gpu)
     # LOG.info('| distributed init (rank {}): {}'.format(cfg.trainer.rank, cfg.trainer.gpu))

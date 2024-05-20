@@ -735,8 +735,13 @@ class Hugginface_Trainer(BaseTrainer):
                     for index in index_list:
                         index_directory.append(f"{directory_base}/{corruptions_order[i]}/{index}")
                         os.makedirs(f"{directory_base}/{corruptions_order[i]}/{index}", exist_ok=True)
-                        os.makedirs(f"{directory_base}/{corruptions_order[i]}/{index}/sde", exist_ok=True)
+                        os.makedirs(f"{directory_base}/{corruptions_order[i]}/{index}/sde/clipped", exist_ok=True)
+                        os.makedirs(f"{directory_base}/{corruptions_order[i]}/{index}/sde/non_clipped", exist_ok=True)
                         os.makedirs(f"{directory_base}/{corruptions_order[i]}/{index}/ode", exist_ok=True)
+                        os.makedirs(f"{directory_base}/{corruptions_order[i]}/{index}/ode/clipped", exist_ok=True)
+                        os.makedirs(f"{directory_base}/{corruptions_order[i]}/{index}/ode/non_clipped", exist_ok=True)
+                        os.makedirs(f"{directory_base}/{corruptions_order[i]}/{index}/reconstruction/clipped", exist_ok=True)
+                        os.makedirs(f"{directory_base}/{corruptions_order[i]}/{index}/reconstruction/non_clipped", exist_ok=True)
 
                 for i,image in enumerate(img_tensor):
                     save_image(img_tensor[i].cpu()/2+0.5,f"{index_directory[i]}/corrupted.png")
@@ -752,19 +757,24 @@ class Hugginface_Trainer(BaseTrainer):
                     wandb.log({f"Original": img_grid_original},commit=True)
 
                 if self.cfg.trainer.run_sdedit and run_sdedit:
-                    for latent in range(sde_range[0],sde_range[1], sde_range[2]):
-                        sample_step = 1
-                        results = SDEditing(img_tensor, sde_betas, sde_logvar, sde_model, sample_step, latent, n=number_of_sample, huggingface = True)
-                        results_normalized = results / 2 + 0.5
-                        samples = torch.stack(results_normalized.split(number_of_sample, dim=0))
-                        for k, corruption_samples in enumerate(samples):
-                            for sample_index, sample in enumerate(corruption_samples):
-                                save_image(sample.cpu(), f"{index_directory[k]}/sde/{latent}_{sample_index}.png")
-                        if self.cfg.trainer.gpu == 0:
-                            grid_reco_sde = make_grid(results_normalized.cpu().detach())
-                            img_grid_reco_sde = wandb.Image(grid_reco_sde.permute(1,2,0).numpy())
-                            wandb.log({f"SDE_Reconstruction_{latent}": img_grid_reco_sde},commit=True)
-                        torch.cuda.empty_cache()
+                    for clip_input in [False]:
+                        for latent in range(sde_range[0],sde_range[1], sde_range[2]):
+                            sample_step = 1
+                            results = SDEditing(img_tensor, sde_betas, sde_logvar, sde_model, sample_step, latent, n=number_of_sample, huggingface = True, 
+                                        clip_input = clip_input, number_of_stds = self.cfg.trainer.number_of_stds)
+                            results_normalized = results / 2 + 0.5
+                            samples = torch.stack(results_normalized.split(number_of_sample, dim=0))
+                            for k, corruption_samples in enumerate(samples):
+                                for sample_index, sample in enumerate(corruption_samples):
+                                    if clip_input:
+                                        save_image(sample.cpu(), f"{index_directory[k]}/sde/clipped/{latent}_{sample_index}.png")
+                                    else:
+                                        save_image(sample.cpu(), f"{index_directory[k]}/sde/non_clipped/{latent}_{sample_index}.png")
+                            if self.cfg.trainer.gpu == 0:
+                                grid_reco_sde = make_grid(results_normalized.cpu().detach())
+                                img_grid_reco_sde = wandb.Image(grid_reco_sde.permute(1,2,0).numpy())
+                                wandb.log({f"SDE_Reconstruction_{latent}_clip_{clip_input}": img_grid_reco_sde},commit=True)
+                            torch.cuda.empty_cache()
                 run_sdedit = False
                 ckpt_dict = {'index':current_index, 'epsilon':current_epsilon, 'run_sdedit':run_sdedit}
                 pickle.dump(ckpt_dict,open(f"{directory_base}/checkpoint_state.p",'wb'))
@@ -784,15 +794,21 @@ class Hugginface_Trainer(BaseTrainer):
                                                         prev_pred = None, previous_x = None,
                                                         forward = True, number_of_sample = 1) 
                     if self.cfg.trainer.gpu == 0:
+                        
                         grid_latent = make_grid(torch.clamp(inputs.cpu().detach(),-1,1))
                         img_grid_latent = wandb.Image(grid_latent.permute(1,2,0).numpy())
                         wandb.log({f"Reconstruction_{clipped}": img_grid_latent},commit=True)
+
+                    for k, sample in enumerate(inputs):
+                        if clipped:
+                            save_image(sample.cpu()/ 2 + 0.5, f"{index_directory[k]}/reconstruction/clipped/reconstruction_ddim.png")
+                        else:
+                            save_image(sample.cpu()/ 2 + 0.5, f"{index_directory[k]}/reconstruction/non_clipped/reconstruction_ddim.png")
                         
                 if ode_range[1] > len(latent_codes):
                     ode_range = [len(latent_codes) -1, len(latent_codes) ,1]
 
                 for latent in range(ode_range[0], ode_range[1], ode_range[2]):
-                    
                     for clipped, code in enumerate(codes):
                         if self.cfg.trainer.gpu == 0:
                             grid_latent = make_grid(torch.clamp(code[latent-1].cpu().detach(),-1,1))
@@ -811,17 +827,15 @@ class Hugginface_Trainer(BaseTrainer):
                                                             min_variance = -1. , number_of_sample = number_of_sample,
                                                             corrector_step = self.cfg.trainer.number_of_latents_corrected, use_std_schedule = self.cfg.trainer.use_std_schedule, 
                                                             start_from_latent = self.cfg.trainer.start_from_latent)
-                                        # list_of_evolution_reverse, samples = self.editing_with_ode(latent_codes, self.ddpm, t_start = latent, 
-                                        #             std_div = -1, epsilon = epsilon, steps = number_of_steps, power =0.5, min_latent_space_update = self.cfg.trainer.min_latent_space_update,
-                                        #             number_of_sample = number_of_sample, annealing = self.cfg.trainer.annealing, annealing_cst=self.cfg.trainer.annealing_cst,
-                                        #             corrector_step = self.cfg.trainer.number_of_latents_corrected,use_std_schedule=self.cfg.trainer.use_std_schedule
-                                        #             )
                                     samples_stacked = torch.stack(samples)
+                                    samples = torch.stack(samples_stacked.split(number_of_sample, dim=0)) 
 
-                                    samples = torch.stack(samples_stacked.split(number_of_sample, dim=0)) / 2 + 0.5
                                     for k, corruption_samples in enumerate(samples):
                                         for sample_index, sample in enumerate(corruption_samples):
-                                            save_image(sample.cpu(), f"{index_directory[k]}/ode/{number_of_steps}_{round(epsilon,9)}_{sample_index}_clipped_{clipped}.png")
+                                            if clipped:
+                                                save_image(sample.cpu()/ 2 + 0.5, f"{index_directory[k]}/ode/clipped/{number_of_steps}_{round(epsilon,9)}_{sample_index}.png")
+                                            else:
+                                                save_image(sample.cpu()/ 2 + 0.5, f"{index_directory[k]}/ode/non_clipped/{number_of_steps}_{round(epsilon,9)}_{sample_index}.png")
                                     if self.cfg.trainer.gpu == 0:
                                         grid_reco = make_grid(samples_stacked.cpu().detach())
                                         img_grid_reco= wandb.Image(grid_reco.permute(1,2,0).numpy())
@@ -956,6 +970,7 @@ class Hugginface_Trainer(BaseTrainer):
                                         number_of_sample = number_of_sample, annealing = self.cfg.trainer.annealing, annealing_cst=self.cfg.trainer.annealing_cst,
                                         corrector_step = False, use_std_schedule = self.cfg.trainer.use_std_schedule)
                             samples_stacked = torch.stack(samples)
+
                             if self.cfg.trainer.batch_size > 1:
                                 samples = torch.stack(samples_stacked.split(number_of_sample, dim=0)) 
                                 for sample_index, image_index in enumerate(index_list):
@@ -963,6 +978,7 @@ class Hugginface_Trainer(BaseTrainer):
                                         save_image(samples[sample_index][m].cpu()/2+0.5, 
                                             f"{directory_reconstruction_ode_latent_corruption}/{image_index}/{number_of_steps}_{round(epsilon,6)}/{m}_{self.cfg.trainer.gpu}.png")
                                 if self.cfg.trainer.gpu == 0:
+                                    print('samples_stacked', samples_stacked.min(), samples_stacked.max())
                                     grid_reco = make_grid(samples_stacked.cpu().detach())
                                     img_grid_reco= wandb.Image(grid_reco.permute(1,2,0).numpy())
                                     wandb.log({f"Reconstruction_l{latent}_{corruption}_e{round(epsilon,6)}_{image_index}": img_grid_reco},commit=True)
@@ -972,6 +988,7 @@ class Hugginface_Trainer(BaseTrainer):
                                         save_image(samples_stacked[m].cpu()/2+0.5, 
                                             f"{directory_reconstruction_ode_latent_corruption}/{image_index}/{number_of_steps}_{round(epsilon,6)}/{m}_{self.cfg.trainer.gpu}.png")
                                 if self.cfg.trainer.gpu == 0:
+                                    print('samples_stacked', samples_stacked.min(), samples_stacked.max())
                                     grid_reco = make_grid(samples_stacked.cpu().detach())
                                     img_grid_reco= wandb.Image(grid_reco.permute(1,2,0).numpy())
                                     wandb.log({f"Reconstruction_l{latent}_{corruption}_e{round(epsilon,6)}_{image_index}": img_grid_reco},commit=True)

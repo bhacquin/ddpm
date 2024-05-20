@@ -3,10 +3,43 @@ import numpy as np
 import matplotlib.pyplot as plt
 from diffusers import DDPMPipeline, DDIMPipeline, PNDMPipeline,DiffusionPipeline
 import warnings
+
 from tqdm import tqdm
 
 warnings.filterwarnings("ignore")
 device = 'cuda'
+
+@torch.no_grad()
+def _clip_inputs(sample: torch.FloatTensor, t : int, sde_betas, sde_alphas, sde_alphas_cumprod, number_of_stds: float = 2., original_img = None, previous_x = None):
+    """
+    Cliping the inputs with an confidence interval given by the diffusion schedule
+    """
+    dtype = sample.dtype
+    batch_size, channels, *remaining_dims = sample.shape
+    if dtype not in (torch.float32, torch.float64):
+        sample = sample.float()  # upcast for quantile calculation, and clamp not implemented for cpu half
+    alphas_cumprod = sde_alphas_cumprod
+    alphas = sde_alphas
+    alpha_t = sde_alphas_cumprod[t]
+    sqrt_alpha_local_t = torch.sqrt(alphas[t])
+    one_minus_alphas_local_t = torch.sqrt(1-alphas[t]).item()
+    sqrt_alpha_t = torch.sqrt(alpha_t).item()
+    one_minus_sqrt_alpha_t = torch.sqrt(1-alpha_t).item()
+    if original_img is not None and previous_x is not None and t > 0:
+        mean = original_img * torch.sqrt(alphas_cumprod[t-1]).item() * (sde_betas[t]).item() / (1 - alphas[t].item())
+        mean += previous_x * torch.sqrt(alphas[t]).item() * (1 - alphas_cumprod[t-1].item()) / (1-alphas_cumprod[t].item())
+        plt.imshow(mean[0].permute(1,2,0).cpu()/2+0.5)
+        plt.show()
+        std = betas[t].item() * (1-alphas_cumprod[t-1].item())/(1-alphas_cumprod[t].item())
+        confidence_interval = [mean - number_of_stds * std, mean + number_of_stds * std]
+    elif original_img is None:
+        confidence_interval = [-sqrt_alpha_t - number_of_stds * one_minus_sqrt_alpha_t, sqrt_alpha_t + number_of_stds * one_minus_sqrt_alpha_t]
+    else:
+        confidence_interval = [sqrt_alpha_t * original_img - number_of_stds * one_minus_sqrt_alpha_t, 
+                            sqrt_alpha_t * original_img + number_of_stds * one_minus_sqrt_alpha_t]
+    sample = torch.clamp(sample, confidence_interval[0], confidence_interval[1])
+    sample = sample.to(dtype)
+    return sample
 
 def extract(a, t, x_shape):
     """Extract coefficients from a based on t and reshape to make it
@@ -76,13 +109,11 @@ def imshow(img, title=""):
     plt.show()
 
 
-def SDEditing(img_tensor, betas, logvar, model, sample_step, total_noise_levels, n=4, huggingface = False,  verbose = False, device = 'cuda'):
+def SDEditing(img_tensor, betas, logvar, model, sample_step, total_noise_levels, n=4, huggingface = False, clip_input = False, number_of_stds = 2, verbose = False, device = 'cuda'):
     # print("Start sampling")
+    sde_alphas = 1.0 - betas
+    sde_alphas_cumprod = np.cumprod(sde_alphas, axis=0)
     with torch.no_grad():
-        # [mask, img] = torch.load("colab_demo/{}.pth".format(name))
-        # img = PIL.Image.open("/mnt/scitas/bastien/CelebAMask-HQ/CelebA-HQ-img/1008.jpg").resize([256,256])
-        # img = img.convert('RGB')
-        # img = (torch.from_numpy(np.array(img))/255).permute(2,0,1)
         img = img_tensor.to(device)
         img = img_tensor / 2 + 0.5
         img = img.to(device)
@@ -105,6 +136,10 @@ def SDEditing(img_tensor, betas, logvar, model, sample_step, total_noise_levels,
             e = torch.randn_like(x0)
             a = (1 - betas).cumprod(dim=0).to(device)
             x = x0 * a[total_noise_levels - 1].sqrt() + e * (1.0 - a[total_noise_levels - 1]).sqrt()
+            if clip_input and total_noise_levels > 1:
+                before = x
+                x = _clip_inputs(x,total_noise_levels - 1, betas,sde_alphas, sde_alphas_cumprod, number_of_stds)
+                # print('diff', (before - x).pow(2).mean())
             if verbose:
                 imshow(x, title="Perturb with SDE")
 
@@ -116,6 +151,10 @@ def SDEditing(img_tensor, betas, logvar, model, sample_step, total_noise_levels,
                                                                     logvar=logvar,
                                                                     betas=betas, huggingface = huggingface)
                     x = x0 * a[i].sqrt() + e * (1.0 - a[i]).sqrt()
+                    if clip_input and i > 1:
+                        before = x
+                        x = _clip_inputs(x,i - 1, betas,sde_alphas, sde_alphas_cumprod, number_of_stds)
+                        # print('diff', (before - x).pow(2).mean())
                     x[:, (mask != 1.)] = x_[:, (mask != 1.)]
                     # added intermediate step vis
                     # if (i - 99) % 100 == 0:
