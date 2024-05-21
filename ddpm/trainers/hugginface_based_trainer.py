@@ -522,12 +522,12 @@ class Hugginface_Trainer(BaseTrainer):
 
         if t_start > min_latent_space_update + corrector_step and corrector_step > 1:
             correction_latents = np.linspace(min_latent_space_update, t_start, corrector_step).astype(int).tolist()
-            epsilon_correction = np.geomspace(1,300,len(timesteps))[::-1]
+            epsilon_correction = np.geomspace(1,100,len(timesteps))[::-1]
             if use_std_schedule:
                 epsilon_correction = 1 / stds.cpu().numpy()
             epsilon_correction = epsilon_correction / epsilon_correction[len(timesteps)-1]
         else:
-            epsilon_correction = np.geomspace(1,300,len(timesteps))[::-1]
+            epsilon_correction = np.geomspace(1,100,len(timesteps))[::-1]
             epsilon_correction = epsilon_correction / epsilon_correction[len(timesteps)-1]
             correction_latents = [t_start]
 
