@@ -309,7 +309,8 @@ class Hugginface_Trainer(BaseTrainer):
         index = t
         timesteps = self.ddpm.scheduler.timesteps.tolist()[::-1]
         t = timesteps[index]
-        # index = t
+        print('index', index)
+        print('t', t)
         t = torch.tensor([t] * inputs.shape[0]).cuda(self.cfg.trainer.gpu)   
         mean_coef_t = torch.sqrt(_extract_into_tensor(alphas_cumprod, t , inputs.shape))
         variance = _extract_into_tensor(1.0 - alphas_cumprod, t , inputs.shape)
@@ -507,12 +508,12 @@ class Hugginface_Trainer(BaseTrainer):
                         annealing_cst = 0.8, epsilon = 1e-8, 
                         steps = 20, power =0.5, min_latent_space_update = 99, 
                         min_variance = -1. , number_of_sample = 1,
-                        corrector_step = 1, use_std_schedule = False, start_from_latent = True):
+                        corrector_step = 1, use_std_schedule = False, start_from_latent = False):
         
         alphas_cumprod = self.ddpm.scheduler.alphas_cumprod
         timesteps = self.ddpm.scheduler.timesteps.tolist()
         stds = torch.sqrt(1-alphas_cumprod)
-
+        epsilon_base = epsilon
         list_of_evolution_reverse = []
         final_samples = []
         t_valid = list(range(0, min(len(latent_codes)+1,len(timesteps))))
@@ -547,14 +548,14 @@ class Hugginface_Trainer(BaseTrainer):
             else:
                 inputs = inputs
             inputs = inputs.cuda(self.cfg.trainer.gpu)
-
-            # for t in tqdm(t_valid[::-1]):
             if start_from_latent:
                 t_valid = t_valid[::-1]
             else:
                 t_valid = range(t_start)[::-1]
             for t in tqdm(t_valid):
                 if t in correction_latents:
+                    epsilon = epsilon_base * epsilon_correction[t]
+                    LOG.info(f'At time {t}, epsilon is {epsilon}')
                     if annealing>1:
                         new_epsilon = epsilon
                         step_per_epsilon = steps // len(range(int(annealing))) 
@@ -573,10 +574,6 @@ class Hugginface_Trainer(BaseTrainer):
                     for h in range(len(inputs)):
                             list_of_evolution_reverse.append(inputs[h].cpu())
 
-
-                # inputs, _, _ = self.ddim_step(inputs, t, sigma = 0.,
-                #                                         clip_denoised=False,dynamic_thresholding=self.cfg.trainer.dynamic_thresholding_ddim, forward=True, 
-                #                                         number_of_sample = number_of_sample)   
                 inputs, _, _, _ = self.ddim_step(inputs, t, clip_denoised = False, dynamic_thresholding = self.cfg.trainer.dynamic_thresholding_ddim, 
                                                             clip_value = 1, sigma = 0, 
                                                             clip_inputs = self.cfg.trainer.clip_input_decoding, stop_clipping_at = self.cfg.trainer.stop_clipping_at, 
@@ -602,10 +599,7 @@ class Hugginface_Trainer(BaseTrainer):
             inputs = inputs + 0.01 * torch.randn_like(inputs)
         with torch.no_grad():
             latent_codes.append(inputs.cpu())
-            print(self.ddpm.scheduler.timesteps.shape[0])
             for t in range(0,self.ddpm.scheduler.timesteps.shape[0]-1):
-                # inputs, std_eps, mean_eps = self.ddim_step(inputs, t,  sigma = 0.,
-                # clip_denoised=False,dynamic_thresholding = self.cfg.trainer.dynamic_thresholding_ddim, forward=False)
                 inputs, std_eps, mean_eps, x0_t = self.ddim_step(inputs, t, sigma = 0.,
                                         clip_denoised=False,dynamic_thresholding=self.cfg.trainer.dynamic_thresholding_ddim,  forward=False, 
                                         clip_inputs = clip_input,  
@@ -620,7 +614,6 @@ class Hugginface_Trainer(BaseTrainer):
     def batch_for_single_image_experiments(self, input_image = None, number = 1, number_of_images = 4):
         corruptions_list = self.corruptions_list
         subset_new_corruption = self.new_corruptions_list
-        print(subset_new_corruption)
         number_of_images = self.cfg.trainer.number_of_image or number_of_images
         img_list = []
         original_list = []
@@ -821,6 +814,8 @@ class Hugginface_Trainer(BaseTrainer):
                                 if l >= current_epsilon or self.cfg.trainer.run_all_epsilon:
                                     current_epsilon = l
                                     with torch.no_grad():
+                                        if latent < self.cfg.trainer.timesteps /2:
+                                            epsilon = epsilon * 100
                                         list_of_evolution_reverse, samples = self.editing_with_ode(code, t_start = latent-1, annealing = self.cfg.trainer.annealing,
                                                             annealing_cst = self.cfg.trainer.annealing_cst, epsilon = epsilon, 
                                                             steps = number_of_steps, power =0.5, min_latent_space_update = self.cfg.trainer.min_latent_space_update, 
