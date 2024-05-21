@@ -814,7 +814,7 @@ class Hugginface_Trainer(BaseTrainer):
                                 if l >= current_epsilon or self.cfg.trainer.run_all_epsilon:
                                     current_epsilon = l
                                     with torch.no_grad():
-                                        if latent < self.cfg.trainer.timesteps /2:
+                                        if latent < self.cfg.trainer.number_of_timesteps /2:
                                             epsilon = epsilon * 100
                                         list_of_evolution_reverse, samples = self.editing_with_ode(code, t_start = latent-1, annealing = self.cfg.trainer.annealing,
                                                             annealing_cst = self.cfg.trainer.annealing_cst, epsilon = epsilon, 
