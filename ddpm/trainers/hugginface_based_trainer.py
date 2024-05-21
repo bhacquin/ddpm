@@ -309,8 +309,8 @@ class Hugginface_Trainer(BaseTrainer):
         index = t
         timesteps = self.ddpm.scheduler.timesteps.tolist()[::-1]
         t = timesteps[index]
-        print('index', index)
-        print('t', t)
+        # print('index', index)
+        # print('t', t)
         t = torch.tensor([t] * inputs.shape[0]).cuda(self.cfg.trainer.gpu)   
         mean_coef_t = torch.sqrt(_extract_into_tensor(alphas_cumprod, t , inputs.shape))
         variance = _extract_into_tensor(1.0 - alphas_cumprod, t , inputs.shape)
@@ -518,9 +518,9 @@ class Hugginface_Trainer(BaseTrainer):
         final_samples = []
         t_valid = list(range(0, min(len(latent_codes)+1,len(timesteps))))
         model = self.model
-        print("start", t_start)
+        # print("start", t_start)
         t_start = min(t_start, min(len(latent_codes)+1,len(timesteps)))
-        print("new_start", t_start)
+        # print("new_start", t_start)
         if t_start > min_latent_space_update + corrector_step and corrector_step > 1:
             correction_latents = np.linspace(min_latent_space_update, t_start-1, corrector_step).astype(int).tolist()
             epsilon_correction = np.geomspace(1,100,len(timesteps))[::-1]
@@ -554,12 +554,10 @@ class Hugginface_Trainer(BaseTrainer):
                 inputs = inputs.repeat(number_of_sample, 1, 1, 1)
             else:
                 inputs = inputs
-            inputs = inputs.cuda(self.cfg.trainer.gpu)
-
-            
+            inputs = inputs.cuda(self.cfg.trainer.gpu)          
             for t in tqdm(t_valid):
-                print(t)
-                print("correction_latents", correction_latents)
+                # print(t)
+                # print("correction_latents", correction_latents)
                 if t in correction_latents:
                     epsilon = epsilon_base * epsilon_correction[t]
                     LOG.info(f'At time {t}, epsilon is {epsilon}')
@@ -809,7 +807,6 @@ class Hugginface_Trainer(BaseTrainer):
                 #     ode_range = [len(latent_codes) -1, len(latent_codes) ,1]
 
                 for latent in range(ode_range[0], ode_range[1], ode_range[2]):
-                    print("latent", latent)
                     for clipped, code in enumerate(codes):
                         LOG.info(f"Using clipped {clipped}")
                         if self.cfg.trainer.gpu == 0:
@@ -986,7 +983,6 @@ class Hugginface_Trainer(BaseTrainer):
                                         save_image(samples[sample_index][m].cpu()/2+0.5, 
                                             f"{directory_reconstruction_ode_latent_corruption}/{image_index}/{number_of_steps}_{round(epsilon,6)}/{m}_{self.cfg.trainer.gpu}.png")
                                 if self.cfg.trainer.gpu == 0:
-                                    print('samples_stacked', samples_stacked.min(), samples_stacked.max())
                                     grid_reco = make_grid(samples_stacked.cpu().detach())
                                     img_grid_reco= wandb.Image(grid_reco.permute(1,2,0).numpy())
                                     wandb.log({f"Reconstruction_l{latent}_{corruption}_e{round(epsilon,6)}_{image_index}": img_grid_reco},commit=True)
@@ -996,7 +992,6 @@ class Hugginface_Trainer(BaseTrainer):
                                         save_image(samples_stacked[m].cpu()/2+0.5, 
                                             f"{directory_reconstruction_ode_latent_corruption}/{image_index}/{number_of_steps}_{round(epsilon,6)}/{m}_{self.cfg.trainer.gpu}.png")
                                 if self.cfg.trainer.gpu == 0:
-                                    print('samples_stacked', samples_stacked.min(), samples_stacked.max())
                                     grid_reco = make_grid(samples_stacked.cpu().detach())
                                     img_grid_reco= wandb.Image(grid_reco.permute(1,2,0).numpy())
                                     wandb.log({f"Reconstruction_l{latent}_{corruption}_e{round(epsilon,6)}_{image_index}": img_grid_reco},commit=True)
