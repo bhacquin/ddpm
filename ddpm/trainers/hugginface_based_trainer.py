@@ -518,10 +518,11 @@ class Hugginface_Trainer(BaseTrainer):
         final_samples = []
         t_valid = list(range(0, min(len(latent_codes)+1,len(timesteps))))
         model = self.model
+        print("start", t_start)
         t_start = min(t_start, min(len(latent_codes)+1,len(timesteps)))
-
+        print("new_start", t_start)
         if t_start > min_latent_space_update + corrector_step and corrector_step > 1:
-            correction_latents = np.linspace(min_latent_space_update, t_start, corrector_step).astype(int).tolist()
+            correction_latents = np.linspace(min_latent_space_update, t_start-1, corrector_step).astype(int).tolist()
             epsilon_correction = np.geomspace(1,100,len(timesteps))[::-1]
             if use_std_schedule:
                 epsilon_correction = 1 / stds.cpu().numpy()
@@ -529,10 +530,14 @@ class Hugginface_Trainer(BaseTrainer):
         else:
             epsilon_correction = np.geomspace(1,100,len(timesteps))[::-1]
             epsilon_correction = epsilon_correction / epsilon_correction[len(timesteps)-1]
-            correction_latents = [t_start]
+            correction_latents = [t_start-1]
+        if start_from_latent:
+            t_valid = t_valid[::-1]
+        else:
+            t_valid = range(t_start)[::-1]
 
         with torch.no_grad():
-            inputs = latent_codes[t_start]
+            inputs = latent_codes[t_valid[0]]
             if len(inputs.shape) == 3:
                 inputs = inputs.unsqueeze(0)
                 batch_size = 1
@@ -550,11 +555,11 @@ class Hugginface_Trainer(BaseTrainer):
             else:
                 inputs = inputs
             inputs = inputs.cuda(self.cfg.trainer.gpu)
-            if start_from_latent:
-                t_valid = t_valid[::-1]
-            else:
-                t_valid = range(t_start)[::-1]
+
+            
             for t in tqdm(t_valid):
+                print(t)
+                print("correction_latents", correction_latents)
                 if t in correction_latents:
                     epsilon = epsilon_base * epsilon_correction[t]
                     LOG.info(f'At time {t}, epsilon is {epsilon}')
@@ -800,11 +805,13 @@ class Hugginface_Trainer(BaseTrainer):
                         else:
                             save_image(sample.cpu()/ 2 + 0.5, f"{index_directory[k]}/reconstruction/non_clipped/reconstruction_ddim.png")
                         
-                if ode_range[1] > len(latent_codes):
-                    ode_range = [len(latent_codes) -1, len(latent_codes) ,1]
+                # if ode_range[1] > len(latent_codes):
+                #     ode_range = [len(latent_codes) -1, len(latent_codes) ,1]
 
                 for latent in range(ode_range[0], ode_range[1], ode_range[2]):
+                    print("latent", latent)
                     for clipped, code in enumerate(codes):
+                        LOG.info(f"Using clipped {clipped}")
                         if self.cfg.trainer.gpu == 0:
                             grid_latent = make_grid(torch.clamp(code[latent-1].cpu().detach(),-1,1))
                             img_grid_latent = wandb.Image(grid_latent.permute(1,2,0).numpy())
@@ -818,12 +825,16 @@ class Hugginface_Trainer(BaseTrainer):
                                     with torch.no_grad():
                                         # if latent < self.cfg.trainer.number_of_timesteps /2:
                                         #     epsilon = epsilon * 1
+                                        if clipped:
+                                            start_from_latent = self.cfg.trainer.start_from_latent
+                                        else:
+                                            start_from_latent = False
                                         list_of_evolution_reverse, samples = self.editing_with_ode(code, t_start = latent-1, annealing = self.cfg.trainer.annealing,
                                                             annealing_cst = self.cfg.trainer.annealing_cst, epsilon = epsilon, 
                                                             steps = number_of_steps, power =0.5, min_latent_space_update = self.cfg.trainer.min_latent_space_update, 
                                                             min_variance = -1. , number_of_sample = number_of_sample,
                                                             corrector_step = self.cfg.trainer.number_of_latents_corrected, use_std_schedule = self.cfg.trainer.use_std_schedule, 
-                                                            start_from_latent = self.cfg.trainer.start_from_latent)
+                                                            start_from_latent = start_from_latent)
                                     samples_stacked = torch.stack(samples)
                                     samples = torch.stack(samples_stacked.split(number_of_sample, dim=0)) 
 
