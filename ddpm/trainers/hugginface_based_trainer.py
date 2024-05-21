@@ -527,6 +527,8 @@ class Hugginface_Trainer(BaseTrainer):
                 epsilon_correction = 1 / stds.cpu().numpy()
             epsilon_correction = epsilon_correction / epsilon_correction[len(timesteps)-1]
         else:
+            epsilon_correction = np.geomspace(1,300,len(timesteps))[::-1]
+            epsilon_correction = epsilon_correction / epsilon_correction[len(timesteps)-1]
             correction_latents = [t_start]
 
         with torch.no_grad():
@@ -814,8 +816,8 @@ class Hugginface_Trainer(BaseTrainer):
                                 if l >= current_epsilon or self.cfg.trainer.run_all_epsilon:
                                     current_epsilon = l
                                     with torch.no_grad():
-                                        if latent < self.cfg.trainer.number_of_timesteps /2:
-                                            epsilon = epsilon * 100
+                                        # if latent < self.cfg.trainer.number_of_timesteps /2:
+                                        #     epsilon = epsilon * 1
                                         list_of_evolution_reverse, samples = self.editing_with_ode(code, t_start = latent-1, annealing = self.cfg.trainer.annealing,
                                                             annealing_cst = self.cfg.trainer.annealing_cst, epsilon = epsilon, 
                                                             steps = number_of_steps, power =0.5, min_latent_space_update = self.cfg.trainer.min_latent_space_update, 
