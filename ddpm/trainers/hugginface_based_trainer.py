@@ -182,6 +182,17 @@ class Hugginface_Trainer(BaseTrainer):
         self.model_id = self.cfg.trainer.model_id
         self.ddpm = DDPMPipeline.from_pretrained(self.model_id).to(f"cuda:{self.cfg.trainer.gpu}")
         self.model = self.ddpm.unet
+        if self.cfg.trainer.reset_model:
+            from diffusers import UNet2DModel
+            model = UNet2DModel(
+                sample_size=config.image_size,  # the target image resolution
+                in_channels=3,  # the number of input channels, 3 for RGB images
+                out_channels=3,  # the number of output channels
+                layers_per_block=self.cfg.trainer.layers_per_block,  # how many ResNet layers to use per UNet block
+                block_out_channels=self.cfg.trainer.block_out_channels,  # the number of output channes for each UNet block
+                down_block_types= self.cfg.trainer.down_block_types
+                up_block_types=self.cfg.trainer.up_block_types
+            )
         self.num_timesteps = int(self.ddpm.scheduler.betas.shape[0])
         self.betas = self.ddpm.scheduler.betas
         self.alphas = 1.0 - self.betas
@@ -1085,6 +1096,125 @@ class Hugginface_Trainer(BaseTrainer):
         save_image(grid, path)
         img_grid = wandb.Image(grid.permute(1,2,0).numpy())
         wandb.log({title: img_grid},commit=commit)
+
+    def train(self,) -> None:
+        self.model.train()
+        self.optimizer.zero_grad()
+        previous_loss = 1.
+        for step in range(self.cfg.trainer.total_steps):
+            start_time = time.time()
+            x_0, _ = next(self.datalooper)
+            loading_time = time.time() - start_time
+
+            if self.x_T[0].shape != x_0[0].shape:
+                print(f"Issue with x_T shape, {self.x_T.shape} but {x_0.shape} needed.")
+                self.x_T = torch.randn_like(x_0).cuda(self.cfg.trainer.gpu)
+
+            x_0 = x_0.cuda(self.cfg.trainer.gpu)
+            start_time = time.time()
+
+            if self.half_precision:
+                with torch.cuda.amp.autocast():
+                    loss = self.diffusion_trainer(x_0).mean() / self.cfg.trainer.accumulating_step
+                    diffusion_time = time.time() - start_time
+                self.scaler.scale(loss).backward()
+            else:
+                loss = self.diffusion_trainer(x_0).mean() / self.cfg.trainer.accumulating_step
+                diffusion_time = time.time() - start_time
+                loss.backward()
+
+            # if (previous_loss < 100*loss.data.cpu().item()) and (step >0):
+            #     if self.writer is not None:
+            #         grid_ori_pb = make_grid(x_0) #(make_grid(x_0) + 1) / 2
+            #         img_grid_ori_pb = wandb.Image(grid_ori_pb.permute(1,2,0).cpu().numpy())
+            #         wandb.log({"Problem_Image": img_grid_ori_pb}) 
+
+            # previous_loss = loss.data.cpu().item()
+
+            if (step + 1) % self.cfg.trainer.accumulating_step == 0:
+                if self.half_precision:
+                    self.scaler.step(self.optimizer)
+                    self.scaler.update()
+                    self.sched.step()
+                else:
+                    torch.nn.utils.clip_grad_norm_(self.net_model.parameters(), self.cfg.trainer.grad_clip)
+                    self.optimizer.step()
+                    self.sched.step()
+                self.optimizer.zero_grad()
+
+            ema(self.net_model, self.ema_model, self.cfg.trainer.ema_decay)
+
+            # log
+            if self.writer is not None:
+                self.writer.add_scalar('diffusion_time', diffusion_time, step)
+                self.writer.add_scalar('loading_time', loading_time, step)
+                self.writer.add_scalar('loss', (loss*self.cfg.trainer.accumulating_step).data.cpu().item(), step)
+
+                if step % 1000 == 0:
+                    print(f"Step_{step},  loss :",(loss*self.cfg.trainer.accumulating_step).data.cpu().item())
+            # sample
+            if self.cfg.trainer.sample_step > 0 and step % self.cfg.trainer.sample_step == 0:                
+                self.net_model.eval()
+                if self.writer is not None:
+                    grid_ori = make_grid(x_0) #(make_grid(x_0) + 1) / 2
+                    img_grid_ori = wandb.Image(grid_ori.permute(1,2,0).cpu().numpy())
+                    wandb.log({"Original_Image": img_grid_ori}) 
+
+                if step > 0 :
+                    with torch.no_grad():
+                        if self.half_precision:
+                            with torch.cuda.amp.autocast():
+                                x_0 = self.ema_sampler(self.x_T)
+                        else:
+                            x_0 = self.ema_sampler(self.x_T)
+                        grid = make_grid(x_0)
+                        path = os.path.join(
+                            self.cfg.trainer.logdir, 'sample', '%d.png' % step)
+                        if self.writer is not None:
+                            save_image(grid, path)
+                            # self.writer.add_image('Sample', grid, step)
+                            img_grid = wandb.Image(grid.permute(1,2,0).cpu().numpy())
+                            wandb.log({"Sample_Grid": img_grid})
+                self.net_model.train()
+
+            # save
+            if self.cfg.trainer.save_step > 0 and step % self.cfg.trainer.save_step == 0:
+                ckpt = {
+                    'net_model': self.net_model.state_dict(),
+                    'ema_model': self.ema_model.state_dict(),
+                    'sched': self.sched.state_dict(),
+                    'optim': self.optimizer.state_dict(),
+                    'step': step,
+                    'x_T': self.x_T,
+                    "config": OmegaConf.to_container(self.cfg)
+                }
+                torch.save(ckpt, os.path.join(self.cfg.trainer.logdir, f'ckpt_{step}.pt'))
+
+            # evaluate
+            if self.cfg.trainer.eval_step > 0 and step % self.cfg.trainer.eval_step == 0 and step > 0:
+                net_IS, net_FID, _ = self.evaluate(self.net_sampler, self.net_model)
+                ema_IS, ema_FID, _ = self.evaluate(self.ema_sampler, self.ema_model)
+                metrics = {
+                    'IS': net_IS[0],
+                    'IS_std': net_IS[1],
+                    'FID': net_FID,
+                    'IS_EMA': ema_IS[0],
+                    'IS_std_EMA': ema_IS[1],
+                    'FID_EMA': ema_FID
+                }
+                # pbar.write(
+                #     "%d/%d " % (step, self.cfg.trainer.total_steps) +
+                #     ", ".join('%s:%.3f' % (k, v) for k, v in metrics.items()))
+                if self.writer is not None:
+                    for name, value in metrics.items():
+                        self.writer.add_scalar(name, value, step)
+                    self.writer.flush()
+                with open(os.path.join(self.cfg.trainer.logdir, 'eval.txt'), 'a') as f:
+                    metrics['step'] = step
+                    f.write(json.dumps(metrics) + "\n")
+
+        if self.writer is not None:
+            self.writer.close()
 
 
 
