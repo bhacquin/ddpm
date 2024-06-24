@@ -36,13 +36,13 @@ class Faces(VisionDataset):
 
 
     def __init__(self, celeba_root = "/home/bvandelft/scitas/bastien/CelebAMask-HQ/CelebA-HQ-img",
-                ffhq_root="/home/bvandelft/scitas/datasets/images1024x1024/",
+                 ffhq_root="/home/bvandelft/scitas/datasets/images1024x1024/",
                  split="train",
                  transform=None, target_transform=None,
                  corruption=None,
                  corruption_severity=5):
 
-        super(CelebAHQ, self).__init__(root)
+        super(Faces, self).__init__(root="/home/bvandelft/scitas/bastien/")
         self.split = split
         self.corruption = corruption
         self.corruption_severity = corruption_severity
@@ -51,7 +51,7 @@ class Faces(VisionDataset):
         self.celeba_root = celeba_root
         self.celeba_length = len([name for name in os.listdir(self.celeba_root) if os.path.isfile(os.path.join(self.celeba_root, name))])
         self.ffhq_root = ffhq_root
-        self.ffhq_length = len([name for name in os.listdir(self.ffhq_root) if os.path.isfile(os.path.join(self.celeba_root, name))])
+        self.ffhq_length = len([name for name in os.listdir(self.ffhq_root) if os.path.isfile(os.path.join(self.ffhq_root, name))])
 
 
     def __getitem__(self, index):
@@ -60,16 +60,20 @@ class Faces(VisionDataset):
             X = PIL.Image.open(img_path)
             X_original = X
         else:
-            new_index = index - self.celeba_length
-            img_path = f"{self.ffhq_root}/{new_index}.jpg"
+            new_index = str(index - self.celeba_length)
+            while len(new_index) < 5:
+                new_index = '0'+new_index
+            img_path = f"{self.ffhq_root}/{new_index}.png"
             X = PIL.Image.open(img_path)
             X_original = X
 
-        if self.transform is not None:
-            X = self.transform(X)
-            
         if self.target_transform is not None:
             target = self.target_transform(X_original)
+        if self.transform is not None:
+            X = self.transform(X)
+            X_original = self.transform(X_original)
+            
+
 
         indexes = torch.tensor(index).int()
         return X, X_original, indexes

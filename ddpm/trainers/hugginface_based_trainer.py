@@ -18,7 +18,7 @@ import random
 import torch
 import torch.cuda.amp as amp
 from torch import Tensor, nn
-import torch.nn.functional as F
+import torch.nn.functional as Func
 import torch.optim as optim
 import torch.distributed as dist
 from torch.utils.data import Dataset,Subset,  DataLoader, DistributedSampler, RandomSampler
@@ -66,10 +66,11 @@ from tqdm import trange
 import yaml
 import os
 import numbers
+from PIL import Image
 
 
 from diffusers import UNet2DModel, DDIMScheduler, VQModel, DDIMInverseScheduler
-from diffusers import DDPMPipeline, DDIMPipeline, PNDMPipeline,DiffusionPipeline
+from diffusers import DDPMPipeline, DDIMPipeline, PNDMPipeline, DiffusionPipeline
 
 from ddpm.datasets.celeba import CelebA 
 from ddpm.ddib_diffusion import GaussianDiffusion, SpacedDiffusion, _extract_into_tensor, space_timesteps, LossType, ModelMeanType, ModelVarType, get_named_beta_schedule
@@ -77,6 +78,14 @@ from ddpm.datasets.corruptions import *
 
 
 LOG = logging.getLogger(__name__)
+
+def make_image_grid(images, rows, cols):
+    w, h = images[0].size
+    grid = Image.new('RGB', size=(cols*w, rows*h))
+    for i, image in enumerate(images):
+        grid.paste(image, box=(i%cols*w, i//cols*h))
+    return grid
+
 
 def ema(source, target, decay):
     source_dict = source.state_dict()
@@ -178,34 +187,61 @@ class Hugginface_Trainer(BaseTrainer):
         self.root = self.cfg.trainer.log_root
         os.makedirs(self.root, exist_ok=True)
 
+        self.train_dataset, self.test_dataset = get_dataset(None, self.cfg)
+        self.train_dataloader = create_dataloader(self.train_dataset,
+                            rank=self.cfg.trainer.rank,
+                            max_workers=self.cfg.trainer.num_workers,
+                            world_size=self.cfg.trainer.world_size,
+                            batch_size=self.cfg.trainer.training_batch_size,
+                            shuffle=False,
+                            single_gpu = self.cfg.trainer.single_gpu
+                            )
+        if self.test_dataset is None:
+            LOG.info(f"test dataset adjusted to train dataset.")
+            self.test_dataset = self.train_dataset
+        self.num_epochs = int(self.cfg.trainer.total_steps * (self.cfg.trainer.training_batch_size/self.cfg.trainer.world_size) / len(self.train_dataset)) + 1
+        LOG.info(f"Number of epochs to perform: {self.num_epochs}")
+
         # Get the pipeline, model and its parameters
         self.model_id = self.cfg.trainer.model_id
         self.ddpm = DDPMPipeline.from_pretrained(self.model_id).to(f"cuda:{self.cfg.trainer.gpu}")
-        self.model = self.ddpm.unet
+        self.lr_scheduler = None 
+
         if self.cfg.trainer.reset_model:
             from diffusers import UNet2DModel
+            from diffusers import DDPMScheduler
             model = UNet2DModel(
-                sample_size=config.image_size,  # the target image resolution
+                sample_size= self.cfg.trainer.img_size,  # the target image resolution
                 in_channels=3,  # the number of input channels, 3 for RGB images
                 out_channels=3,  # the number of output channels
-                layers_per_block=self.cfg.trainer.layers_per_block,  # how many ResNet layers to use per UNet block
-                block_out_channels=self.cfg.trainer.block_out_channels,  # the number of output channes for each UNet block
-                down_block_types= self.cfg.trainer.down_block_types
-                up_block_types=self.cfg.trainer.up_block_types
+                layers_per_block= self.cfg.trainer.layers_per_block,  # how many ResNet layers to use per UNet block
+                block_out_channels= list(self.cfg.trainer.block_out_channels),  # the number of output channes for each UNet block
+                down_block_types= list(self.cfg.trainer.down_block_types),
+                up_block_types= list(self.cfg.trainer.up_block_types)
             )
-        self.num_timesteps = int(self.ddpm.scheduler.betas.shape[0])
+            if self.cfg.trainer.ema_model:
+                self.ema_model = copy.deepcopy(model).cuda(self.cfg.trainer.gpu)
+            self.ddpm.unet = model
+            self.ddpm.scheduler = DDPMScheduler(num_train_timesteps=self.cfg.trainer.ddpm_timesteps)
+            self.num_timesteps = int(self.ddpm.scheduler.betas.shape[0])
+            self.optimizer = torch.optim.AdamW(self.ddpm.unet.parameters(), lr=self.cfg.trainer.learning_rate)
+            if self.cfg.trainer.use_lr_scheduler:
+                from diffusers.optimization import get_cosine_schedule_with_warmup
+                self.lr_scheduler = get_cosine_schedule_with_warmup(
+                                                optimizer=self.optimizer,
+                                                num_warmup_steps=self.cfg.trainer.lr_warmup_steps,
+                                                num_training_steps=(len(self.train_dataloader) * self.num_epochs),
+                                            )
+                
         self.betas = self.ddpm.scheduler.betas
         self.alphas = 1.0 - self.betas
         self.alphas_cumprod = np.cumprod(self.alphas, axis=0)
         self.dynamic_threshol_ratio = self.cfg.trainer.dynamic_threshol_ratio
         self.dynamic_threshold_max = self.cfg.trainer.dynamic_threshold_max
-
-        self.train_dataset, self.test_dataset = get_dataset(None, self.cfg)
-        if self.test_dataset is None:
-            LOG.info(f"test dataset adjusted to train dataset.")
-            self.test_dataset = self.train_dataset
+        
         if not self.cfg.trainer.single_gpu:
             dist.barrier()
+        
         self.corruptions_list = self.cfg.trainer.corruptions_list or ["motion_blur", "frost", "speckle_noise", "impulse_noise", "shot_noise", "jpeg_compression",
                                 "pixelate", "brightness", "fog", "saturate", "gaussian_noise", 'elastic_transform','saturate',
                                 'snow', 'masking_vline_random_color', 'spatter', 'glass_blur', 'gaussian_blur', 'contrast', 'masking_random_color']
@@ -228,14 +264,8 @@ class Hugginface_Trainer(BaseTrainer):
 
         LOG.info(f"train dataset length {len(self.train_dataset)}")
         LOG.info(f"test dataset length {len(self.test_dataset)}")
-        self.ddpm.scheduler.set_timesteps(self.cfg.trainer.number_of_timesteps)
         LOG.info(f"Number of timesteps for DDIM {len(self.ddpm.scheduler.timesteps)}")
 
-
-    def train(self,) -> None:
-        LOG.info("Huggingface models are pretrained, no need to train them")
-        return 
-        
 
     def log(self,) -> None:
         """
@@ -320,8 +350,6 @@ class Hugginface_Trainer(BaseTrainer):
         index = t
         timesteps = self.ddpm.scheduler.timesteps.tolist()[::-1]
         t = timesteps[index]
-        # print('index', index)
-        # print('t', t)
         t = torch.tensor([t] * inputs.shape[0]).cuda(self.cfg.trainer.gpu)   
         mean_coef_t = torch.sqrt(_extract_into_tensor(alphas_cumprod, t , inputs.shape))
         variance = _extract_into_tensor(1.0 - alphas_cumprod, t , inputs.shape)
@@ -335,7 +363,7 @@ class Hugginface_Trainer(BaseTrainer):
             std_prev = torch.sqrt(variance_t_prev)
             if self.cfg.trainer.clip_inputs_langevin and (index > self.cfg.trainer.stop_clipping_at):
                 inputs = self._clip_inputs(inputs, t = index, number_of_stds = self.cfg.trainer.number_of_stds)
-            noise_estimate_t_prev = self.model(inputs, t_prev)['sample']
+            noise_estimate_t_prev = self.ddpm.unet(inputs, t_prev)['sample']
             x0_t_1 = (inputs - std_prev * noise_estimate_t_prev)/mean_coef_t_prev
             if dynamic_thresholding:
                 x0_t_1 = self._threshold_sample(x0_t_1, self.dynamic_threshol_ratio, self.dynamic_threshold_max)
@@ -351,7 +379,7 @@ class Hugginface_Trainer(BaseTrainer):
             for i in range(steps):
                 if self.cfg.trainer.clip_inputs_langevin and (index > self.cfg.trainer.stop_clipping_at):
                     inputs = self._clip_inputs(inputs, t = index, number_of_stds = self.cfg.trainer.number_of_stds)
-                noise_estimate = self.model(inputs, t)['sample']
+                noise_estimate = self.ddpm.unet(inputs, t)['sample']
                 if dynamic_thresholding:
                     x0_t = (inputs - std * noise_estimate)/mean_coef_t
                     x0_t = self._threshold_sample(x0_t, self.dynamic_threshol_ratio, self.dynamic_threshold_max)
@@ -369,7 +397,7 @@ class Hugginface_Trainer(BaseTrainer):
             if denoising_step:
                 if self.cfg.trainer.clip_inputs_langevin and (index > self.cfg.trainer.stop_clipping_at):
                     inputs = self._clip_inputs(inputs, t = index, number_of_stds = self.cfg.trainer.number_of_stds)
-                noise_estimate = self.model(inputs, t)['sample']
+                noise_estimate = self.ddpm.unet(inputs, t)['sample']
                 score = - noise_estimate / std
                 inputs = (inputs + alpha_coef * score) 
         return inputs, alpha_coef, std_epsilon, mean_epsilon
@@ -406,7 +434,7 @@ class Hugginface_Trainer(BaseTrainer):
                 else:
                     inputs = self._clip_inputs(inputs, t = index, number_of_stds = self.cfg.trainer.number_of_stds, original_img = prev_pred, previous_x = None)
 
-        noise_estimate = self.model(inputs, t)['sample']
+        noise_estimate = self.ddpm.unet(inputs, t)['sample']
         std_epsilon = noise_estimate[0].cpu().std().item()
         mean_epsilon = noise_estimate[0].cpu().mean().item()
         x0_t = (inputs - std * noise_estimate)/mean_coef_t
@@ -528,7 +556,7 @@ class Hugginface_Trainer(BaseTrainer):
         list_of_evolution_reverse = []
         final_samples = []
         t_valid = list(range(0, min(len(latent_codes)+1,len(timesteps))))
-        model = self.model
+        model = self.ddpm.unet
         # print("start", t_start)
         t_start = min(t_start, min(len(latent_codes)+1,len(timesteps)))
         # print("new_start", t_start)
@@ -655,7 +683,9 @@ class Hugginface_Trainer(BaseTrainer):
     @torch.no_grad()
     def run_qualitative_experiments(self,number_of_image = 1, corruptions = 'all', sde_range = [99,800,100], 
                             ode_range = [99, 1000, 100], number_of_sample = 3, celebaHQ = True):
-        # try:
+
+        self.ddpm.scheduler.set_timesteps(self.cfg.trainer.number_of_timesteps)
+        self.num_timesteps = int(self.ddpm.scheduler.betas.shape[0])
         number_of_image = self.cfg.trainer.number_of_image or number_of_image
         ode_range = self.cfg.trainer.ode_range or ode_range
         sde_range = self.cfg.trainer.sde_range or sde_range
@@ -813,9 +843,6 @@ class Hugginface_Trainer(BaseTrainer):
                             save_image(sample.cpu()/ 2 + 0.5, f"{index_directory[k]}/reconstruction/clipped/reconstruction_ddim.png")
                         else:
                             save_image(sample.cpu()/ 2 + 0.5, f"{index_directory[k]}/reconstruction/non_clipped/reconstruction_ddim.png")
-                        
-                # if ode_range[1] > len(latent_codes):
-                #     ode_range = [len(latent_codes) -1, len(latent_codes) ,1]
 
                 for latent in range(ode_range[0], ode_range[1], ode_range[2]):
                     for clipped, code in enumerate(codes):
@@ -918,15 +945,9 @@ class Hugginface_Trainer(BaseTrainer):
         epsilons = np.linspace(self.cfg.trainer.min_epsilon,self.cfg.trainer.max_epsilon, self.cfg.trainer.number_of_epsilons)
 
         list_steps = [self.cfg.trainer.number_of_steps]
-        ### IF different per latent
-        # dictionnary_epsilon = {100:[1e-5, 1e-6], 200:[1e-5, 1e-6], 300:[1e-5, 1e-6],400:[1e-5, 1e-6],500:[1e-5, 1e-6],
-        #                         600:[1e-5, 1e-6],700:[1e-5, 1e-6], 800:[1e-5, 1e-6], 900:[1e-5, 1e-6], 1000:[1e-5, 1e-6]}
-        # dictionnary_steps = {100:[100,200], 200:[100,200], 300:[100,200],400:[100,200],500:[100,200],
-        #                         600:[100,200],700:[100,200], 800:[100,200], 900:[100,200], 1000:[100,200]}
+
         LOG.info(f"Starting Dataloader loop.")
         for k, (_, img_batch, indexes) in enumerate(self.dataloader):
-            #run sde
-
             index_list = indexes.tolist()
             for l, corruption in enumerate(corruptions_list):
                 
@@ -1097,121 +1118,92 @@ class Hugginface_Trainer(BaseTrainer):
         img_grid = wandb.Image(grid.permute(1,2,0).numpy())
         wandb.log({title: img_grid},commit=commit)
 
+
     def train(self,) -> None:
-        self.model.train()
-        self.optimizer.zero_grad()
-        previous_loss = 1.
-        for step in range(self.cfg.trainer.total_steps):
-            start_time = time.time()
-            x_0, _ = next(self.datalooper)
-            loading_time = time.time() - start_time
+        global_steps = 0
+        
+        from accelerate import Accelerator
+        # Initialize Accelerate and Training Trackers
+        self.accelerator = Accelerator(mixed_precision=self.cfg.trainer.mixed_precision,
+                                gradient_accumulation_steps=self.cfg.trainer.gradient_accumulation_steps, 
+                                log_with="wandb",
+                                )
 
-            if self.x_T[0].shape != x_0[0].shape:
-                print(f"Issue with x_T shape, {self.x_T.shape} but {x_0.shape} needed.")
-                self.x_T = torch.randn_like(x_0).cuda(self.cfg.trainer.gpu)
+        if self.cfg.trainer.output_dir is not None:
+            os.makedirs(self.cfg.trainer.output_dir, exist_ok=True)
+        print("Initializing....")
+        self.accelerator.init_trackers(project_name="my_project", 
+                                       config={"dropout": self.cfg.trainer.dropout, "learning_rate": self.cfg.trainer.learning_rate},
+                                       init_kwargs={"wandb": {"entity": self.cfg.trainer.wandb_entity}}
+                                    )
+        if self.lr_scheduler is not None:
+            self.model, self.optimizer, self.train_dataloader, self.lr_scheduler = self.accelerator.prepare(self.ddpm.unet, 
+                                                                                    self.optimizer, 
+                                                                                    self.train_dataloader, 
+                                                                                    self.lr_scheduler)
+        else:
+            self.model, self.optimizer, self.train_dataloader = self.accelerator.prepare(self.ddpm.unet, 
+                                                                                    self.optimizer, 
+                                                                                    self.train_dataloader, 
+                                                                                    )
+        self.pipeline = DDPMPipeline(unet=self.accelerator.unwrap_model(self.model), scheduler=self.ddpm.scheduler)
+        for epoch in range(self.num_epochs):
+            self.optimizer.zero_grad()
+            for step, batch in enumerate(self.train_dataloader):
+                self.model.train()
+                x_0, _, indexes = batch
+                
+                x_0 = x_0 #.cuda(self.cfg.trainer.gpu)
+                t = torch.randint(self.cfg.trainer.ddpm_timesteps, size=(x_0.shape[0],), device=x_0.device)
+                noise = torch.randn_like(x_0)
+                noisy_image = self.ddpm.scheduler.add_noise(x_0, noise, t)
 
-            x_0 = x_0.cuda(self.cfg.trainer.gpu)
-            start_time = time.time()
-
-            if self.half_precision:
-                with torch.cuda.amp.autocast():
-                    loss = self.diffusion_trainer(x_0).mean() / self.cfg.trainer.accumulating_step
-                    diffusion_time = time.time() - start_time
-                self.scaler.scale(loss).backward()
-            else:
-                loss = self.diffusion_trainer(x_0).mean() / self.cfg.trainer.accumulating_step
-                diffusion_time = time.time() - start_time
-                loss.backward()
-
-            # if (previous_loss < 100*loss.data.cpu().item()) and (step >0):
-            #     if self.writer is not None:
-            #         grid_ori_pb = make_grid(x_0) #(make_grid(x_0) + 1) / 2
-            #         img_grid_ori_pb = wandb.Image(grid_ori_pb.permute(1,2,0).cpu().numpy())
-            #         wandb.log({"Problem_Image": img_grid_ori_pb}) 
-
-            # previous_loss = loss.data.cpu().item()
-
-            if (step + 1) % self.cfg.trainer.accumulating_step == 0:
-                if self.half_precision:
-                    self.scaler.step(self.optimizer)
-                    self.scaler.update()
-                    self.sched.step()
-                else:
-                    torch.nn.utils.clip_grad_norm_(self.net_model.parameters(), self.cfg.trainer.grad_clip)
+                with self.accelerator.accumulate(self.model):
+                    # Predict the noise residual
+                    noise_pred = self.model(noisy_image, t, return_dict=False)[0]
+                    loss = Func.mse_loss(noise_pred, noise)
+                    self.accelerator.backward(loss)
+                    if self.accelerator.sync_gradients:
+                        self.accelerator.clip_grad_norm_(self.model.parameters(), self.cfg.trainer.clip_grad_norm)
                     self.optimizer.step()
-                    self.sched.step()
-                self.optimizer.zero_grad()
+                    if self.lr_scheduler is not None:
+                        self.lr_scheduler.step()
+                    self.optimizer.zero_grad()
+                logs = {"loss": loss.detach().item(), "lr": self.lr_scheduler.get_last_lr()[0], "step": global_steps}
+                self.accelerator.log(logs, step=global_steps)
+                
+                # Evaluating
+                if (global_steps) % self.cfg.trainer.save_image_steps == 0:
+                    LOG.info("Generating Images ...")
+                    self.model.eval()
+                    images = self.pipeline(batch_size = self.cfg.trainer.eval_batch_size, generator=torch.manual_seed(self.cfg.trainer.seed),).images
+                    image_grid = make_image_grid(images, rows=4, cols=4)
+                    test_dir = os.path.join(self.cfg.trainer.output_dir, "samples")
+                    os.makedirs(test_dir, exist_ok=True)
+                    image_grid.save(f"{test_dir}/{global_steps}.png")
+                    img_grid = wandb.Image(image_grid)
+                    self.accelerator.log({f"Generation": img_grid},step = global_steps)
 
-            ema(self.net_model, self.ema_model, self.cfg.trainer.ema_decay)
+                # Saving
+                if (global_steps+1) % self.cfg.trainer.save_model_steps == 0:
+                    self.pipeline.save_pretrained(self.cfg.trainer.output_dir)
+                if self.cfg.trainer.ema_model: 
+                    ema(self.model, self.ema_model, self.cfg.trainer.ema_decay)
+                global_steps += 1
 
-            # log
-            if self.writer is not None:
-                self.writer.add_scalar('diffusion_time', diffusion_time, step)
-                self.writer.add_scalar('loading_time', loading_time, step)
-                self.writer.add_scalar('loss', (loss*self.cfg.trainer.accumulating_step).data.cpu().item(), step)
 
-                if step % 1000 == 0:
-                    print(f"Step_{step},  loss :",(loss*self.cfg.trainer.accumulating_step).data.cpu().item())
-            # sample
-            if self.cfg.trainer.sample_step > 0 and step % self.cfg.trainer.sample_step == 0:                
-                self.net_model.eval()
-                if self.writer is not None:
-                    grid_ori = make_grid(x_0) #(make_grid(x_0) + 1) / 2
-                    img_grid_ori = wandb.Image(grid_ori.permute(1,2,0).cpu().numpy())
-                    wandb.log({"Original_Image": img_grid_ori}) 
-
-                if step > 0 :
-                    with torch.no_grad():
-                        if self.half_precision:
-                            with torch.cuda.amp.autocast():
-                                x_0 = self.ema_sampler(self.x_T)
-                        else:
-                            x_0 = self.ema_sampler(self.x_T)
-                        grid = make_grid(x_0)
-                        path = os.path.join(
-                            self.cfg.trainer.logdir, 'sample', '%d.png' % step)
-                        if self.writer is not None:
-                            save_image(grid, path)
-                            # self.writer.add_image('Sample', grid, step)
-                            img_grid = wandb.Image(grid.permute(1,2,0).cpu().numpy())
-                            wandb.log({"Sample_Grid": img_grid})
-                self.net_model.train()
-
-            # save
-            if self.cfg.trainer.save_step > 0 and step % self.cfg.trainer.save_step == 0:
-                ckpt = {
-                    'net_model': self.net_model.state_dict(),
-                    'ema_model': self.ema_model.state_dict(),
-                    'sched': self.sched.state_dict(),
-                    'optim': self.optimizer.state_dict(),
-                    'step': step,
-                    'x_T': self.x_T,
-                    "config": OmegaConf.to_container(self.cfg)
-                }
-                torch.save(ckpt, os.path.join(self.cfg.trainer.logdir, f'ckpt_{step}.pt'))
-
-            # evaluate
-            if self.cfg.trainer.eval_step > 0 and step % self.cfg.trainer.eval_step == 0 and step > 0:
-                net_IS, net_FID, _ = self.evaluate(self.net_sampler, self.net_model)
-                ema_IS, ema_FID, _ = self.evaluate(self.ema_sampler, self.ema_model)
-                metrics = {
-                    'IS': net_IS[0],
-                    'IS_std': net_IS[1],
-                    'FID': net_FID,
-                    'IS_EMA': ema_IS[0],
-                    'IS_std_EMA': ema_IS[1],
-                    'FID_EMA': ema_FID
-                }
-                # pbar.write(
-                #     "%d/%d " % (step, self.cfg.trainer.total_steps) +
-                #     ", ".join('%s:%.3f' % (k, v) for k, v in metrics.items()))
-                if self.writer is not None:
-                    for name, value in metrics.items():
-                        self.writer.add_scalar(name, value, step)
-                    self.writer.flush()
-                with open(os.path.join(self.cfg.trainer.logdir, 'eval.txt'), 'a') as f:
-                    metrics['step'] = step
-                    f.write(json.dumps(metrics) + "\n")
+            # # save
+            # if self.cfg.trainer.save_step > 0 and step % self.cfg.trainer.save_step == 0:
+            #     ckpt = {
+            #         'net_model': self.ddpm.unet.state_dict(),
+            #         'ema_model': self.ema_model.state_dict(),
+            #         'sched': self.sched.state_dict(),
+            #         'optim': self.optimizer.state_dict(),
+            #         'step': step,
+            #         'x_T': self.x_T,
+            #         "config": OmegaConf.to_container(self.cfg)
+            #     }
+            #     torch.save(ckpt, os.path.join(self.cfg.trainer.logdir, f'ckpt_{step}.pt'))
 
         if self.writer is not None:
             self.writer.close()

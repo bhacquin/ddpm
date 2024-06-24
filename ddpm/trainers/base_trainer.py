@@ -138,13 +138,13 @@ class BaseTrainer(object):
         self.cfg = init_local_single_gpu_mode(self.cfg)
 
     def run(self) -> None:
-        self.train()
-        # if self.cfg.trainer.mode == "eval":
-        #     self.eval()
-        # elif self.cfg.trainer.mode == "train":
-        #     self.train()
-        # else:
-        #     raise NotImplementedError
+        # self.train()
+        if self.cfg.trainer.mode == "eval":
+            self.eval()
+        elif self.cfg.trainer.mode == "train":
+            self.train()
+        else:
+            raise NotImplementedError
 
     @abstractmethod
     def train(self) -> None:

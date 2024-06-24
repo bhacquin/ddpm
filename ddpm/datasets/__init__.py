@@ -10,6 +10,7 @@ from ddpm.datasets.celeba import CelebA
 from ddpm.datasets.celebahq import CelebAHQ
 from ddpm.datasets.ffhq import FFHQ
 from ddpm.datasets.lsun import LSUN
+from ddpm.datasets.faces import Faces
 # from ddpm.datasets.audio import AudioDataset
 from ddpm.datasets.gta5 import GTA_Pretraining_Dataset
 from ddpm.datasets.imagenet import Imagenet_Dataset
@@ -87,6 +88,22 @@ def get_dataset(args, cfg):
     elif dataset_name == "CELEBAHQ":
         dataset = CelebAHQ(
                 root=datapath,
+                split="train",
+                corruption=corruption,
+                corruption_severity=corruption_severity,
+                transform=transforms.Compose(
+                        [transforms.ToTensor(),
+                        transforms.Resize(image_size),
+                        transforms.CenterCrop([cfg.trainer.img_size,cfg.trainer.img_size]), 
+                        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+                            )
+                )
+        test_dataset = None
+
+    elif dataset_name == "FACES":
+        dataset = Faces(
+                celeba_root=cfg.trainer.celeba_root,
+                ffhq_root=cfg.trainer.ffhq_root,
                 split="train",
                 corruption=corruption,
                 corruption_severity=corruption_severity,
@@ -375,7 +392,7 @@ def get_dataset(args, cfg):
         dataset = Subset(dataset, train_indices)
     
     else:
-        LOG.warning(f"No dataset named {dataset_name}")
+        print(f"No dataset named {dataset_name}")
         dataset, test_dataset = None, None
 
     return dataset, test_dataset
