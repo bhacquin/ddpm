@@ -7,6 +7,14 @@ from .vision import VisionDataset
 from .utils import download_file_from_google_drive, check_integrity
 
 
+def is_png_file(file_path):
+    # Check if the file exists
+    if not os.path.isfile(file_path):
+        return False
+    
+    # Check the file extension
+    return file_path.lower().endswith('.png')
+
 class Faces(VisionDataset):
     """`Large-scale CelebFaces Attributes (CelebA) Dataset <http://mmlab.ie.cuhk.edu.hk/projects/CelebA.html>`_ Dataset.
 
@@ -34,7 +42,6 @@ class Faces(VisionDataset):
 
     base_folder = "CelebAMask-HQ"
 
-
     def __init__(self, celeba_root = "/home/bvandelft/scitas/bastien/CelebAMask-HQ/CelebA-HQ-img",
                  ffhq_root="/home/bvandelft/scitas/datasets/images1024x1024/",
                  split="train",
@@ -50,12 +57,14 @@ class Faces(VisionDataset):
         self.target_transform = target_transform
         self.celeba_root = celeba_root
         self.celeba_length = len([name for name in os.listdir(self.celeba_root) if os.path.isfile(os.path.join(self.celeba_root, name))])
+        print("Celeba nb of items:", self.celeba_length)
         self.ffhq_root = ffhq_root
-        self.ffhq_length = len([name for name in os.listdir(self.ffhq_root) if os.path.isfile(os.path.join(self.ffhq_root, name))])
+        self.ffhq_length = len([name for name in os.listdir(self.ffhq_root) if  is_png_file(os.path.join(self.ffhq_root, name))]) #os.path.isfile(os.path.join(self.ffhq_root, name)) and ])
+        print("ffhq nb of items:", self.ffhq_length)
 
 
     def __getitem__(self, index):
-        if index <= self.celeba_length:
+        if index < self.celeba_length:
             img_path = f"{self.celeba_root}/{index}.jpg"
             X = PIL.Image.open(img_path)
             X_original = X
