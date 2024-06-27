@@ -100,7 +100,7 @@ class Imagenet(VisionDataset):
         print(X.size)
         X_numpy = np.array(X)
         print(X_numpy.shape)
-        transforms = transforms.Compose(
+        transform = transforms.Compose(
                         [transforms.ToTensor(),
                         transforms.Resize(image_size),
                         transforms.CenterCrop([cfg.trainer.img_size,cfg.trainer.img_size]),] 
