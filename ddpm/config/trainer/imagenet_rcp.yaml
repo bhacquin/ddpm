@@ -1,0 +1,114 @@
+defaults:
+  - base_trainer
+name: celeba_diffusion
+platform: local
+single_gpu: false
+type: hugginface
+mode: train
+
+# train: True #train from scratch
+# eval: False #load ckpt.pt and evaluate FID and IS
+test_session: False
+qualitative_experiment: False
+
+# Model ID hugginface
+model_id: google/ddpm-ema-celebahq-256
+log_root: /mnt/nas3_rcp_enac_u0900_vita_scratch/vita-staff/users/bvandelft/results #/mnt/scitas/bastien
+random_seed: true
+
+# Dataset
+datapath: /mnt/nas3_rcp_enac_u0900_vita_scratch/datasets/imagenet-1k/ #/mnt/nas3_rcp_enac_u0900_vita_scratch/datasets/imagenet-1k/ #/mnt/scitas/bastien/CelebAMask-HQ/CelebA-HQ-img #help='dataset path if downloaded
+celeba_root: #/home/bvandelft/scitas/bastien/CelebAMask-HQ/CelebA-HQ-img
+ffhq_root: #/home/bvandelft/scitas/datasets/ffhq/images1024x1024
+
+dataset: IMAGENET #help='dataset name')
+exp_name_folder: Imagenet
+lsun_category: # one of ["bedroom","bridge","church_outdoor","classroom","conference_room","dining_room","kitchen","living_room","restaurant","tower",
+corruptions_list:  
+new_corruptions_list: 
+split: all
+use_val: false
+num_workers: 4 #help='workers of Dataloader')
+corruption:  #help=corruption type base on Imagenet-C
+corruption_severity:  #help='corruption severity level 1-5'
+random_flip: False #help='Whether to use random flip in training')
+img_size: 256 #help='image size')
+use_lr_scheduler: true
+
+# Training
+reset_model: true
+model: "UNet2D" # UNet2D, UNet1D
+ddpm_timesteps: 1000
+block_out_channels: [128, 128, 256, 256, 512, 512, 512]
+layers_per_block: 2
+down_block_types : ["DownBlock2D",  # a regular ResNet downsampling block
+                    "DownBlock2D", 
+                    "DownBlock2D", 
+                    "DownBlock2D", 
+                    "AttnDownBlock2D",  # a ResNet downsampling block with spatial self-attention
+                    "DownBlock2D",
+                    "DownBlock2D",
+                    ]
+up_block_types: ["UpBlock2D",  # a regular ResNet upsampling block
+                 "UpBlock2D",
+                    "AttnUpBlock2D",  # a ResNet upsampling block with spatial self-attention
+                    "UpBlock2D", 
+                    "UpBlock2D", 
+                    "UpBlock2D", 
+                    "UpBlock2D"]
+in_channels: 3
+out_channels: 3
+learning_rate: 1e-4
+total_steps: 1000000000
+gradient_accumulation_steps: 3
+training_batch_size: 32
+eval_batch_size: 16
+dropout: 0.1
+clip_grad_norm: 1.0
+ema_decay: 0.95
+lr_warmup_steps: 10000
+mixed_precision: 'fp16' #['no', 'fp8', 'fp16', 'bf16']
+ema_model: false
+
+# Inference
+run_sdedit: false
+run_all_epsilon: false
+use_std_schedule: false
+number_of_image: 1000
+number_of_sample: 1
+image_number: 
+batch_size: 1 #help='batch size'
+annealing: 4
+annealing_cst: 0.8
+normalize: false 
+normalize_mean: false
+number_of_stds: 1.7
+min_epsilon: 1e-4
+max_epsilon: 2e-3
+number_of_epsilons: 3
+dynamic_thresholding_langevin: true
+dynamic_thresholding_ddim: true
+dynamic_threshol_ratio: 0.98
+dynamic_threshold_max: 1.3
+number_of_latents_corrected: 1
+min_latent_space_update: 101
+clip_input_encoding: true
+clip_input_decoding: false
+clip_inputs_langevin: false
+stop_clipping_at: 0
+start_from_latent: true
+ode_range: [100, 500, 499]
+sde_range: [399,400,500]
+number_of_timesteps: 500
+
+# Logging & Sampling
+number_of_steps: [200]
+save_image_steps: 20000
+save_model_steps: 20000
+logdir: ${trainer.log_root}/logs/IMAGENET #help='log directory')
+base_dir: /mnt/nas3_rcp_enac_u0900_vita_scratch/vita-staff/users/bvandelft/ddpm
+output_dir: /mnt/nas3_rcp_enac_u0900_vita_scratch/vita-staff/users/bvandelft/${trainer.exp_name_folder}/${trainer.sync_key}
+wandb_entity: bastienvd #help='wandb id to use')
+ml_exp_name: ${trainer.dataset} #help = 'name of the experience on wandb')
+
+
