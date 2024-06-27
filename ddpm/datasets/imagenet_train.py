@@ -55,7 +55,7 @@ class Imagenet(VisionDataset):
         valid_splits = ("train",  "val", "all")
         assert self.split in valid_splits
 
-        if self.corruption is None:
+        if corruption is None:
             if self.split == "all":
                 for split in ["train", "val"]:
                     self.images_dir = os.path.join(self.root, split)
@@ -73,18 +73,19 @@ class Imagenet(VisionDataset):
                         for file_name in os.listdir(img_subdir):
                             self.images.append(os.path.join(img_subdir, file_name))
         else:
-            self.original_image_dir = os.path.join(self.root,'val')
-            self.image_c_dir = os.path.join(self.root, "imagenet-c")
-            for corruption in self.corruption:
-                corrupted_image_dir = os.path.join(self.image_c_dir, corruption)
-                for severity in self.corruption_severity:
-                    severity_subdir = os.path.join(corrupted_image_dir, str(severity))
-                    for img_subdir in os.listdir(severity_subdir): 
-                        img_subdir_path = os.path.join(severity_subdir, img_subdir)
-                        original_subdir_path = os.path.join(self.original_image_dir, img_subdir)
-                        for file_name in os.listdir(img_subdir_path):
-                            self.images.append(os.path.join(img_subdir_path, file_name))
-                            self.original_images.append(os.path.join(original_subdir_path, file_name))
+            raise NotImplementedError
+            # self.original_image_dir = os.path.join(self.root,'val')
+            # self.image_c_dir = os.path.join(self.root, "imagenet-c")
+            # for corruption in self.corruption:
+            #     corrupted_image_dir = os.path.join(self.image_c_dir, corruption)
+            #     for severity in self.corruption_severity:
+            #         severity_subdir = os.path.join(corrupted_image_dir, str(severity))
+            #         for img_subdir in os.listdir(severity_subdir): 
+            #             img_subdir_path = os.path.join(severity_subdir, img_subdir)
+            #             original_subdir_path = os.path.join(self.original_image_dir, img_subdir)
+            #             for file_name in os.listdir(img_subdir_path):
+            #                 self.images.append(os.path.join(img_subdir_path, file_name))
+            #                 self.original_images.append(os.path.join(original_subdir_path, file_name))
 
 
     def __getitem__(self, index: int) -> Any:
