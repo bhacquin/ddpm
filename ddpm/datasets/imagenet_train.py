@@ -99,7 +99,7 @@ class Imagenet(VisionDataset):
         X = PIL.Image.open(self.images[index])
         if self.transform is not None:
             X = self.transform(X)
-            X_original = self.transform(X_original)
+            X_original = self.transform(X)
         indexes = torch.tensor(index).int()
         
         return X, X_original, indexes
