@@ -97,16 +97,18 @@ class Imagenet(VisionDataset):
             than one item. Otherwise, target is a json object if target_type="polygon", else the image segmentation.
         """
         X = PIL.Image.open(self.images[index])
+        if X.mode != 'RGB':
+            X = X.convert('RGB')
         print(X.size)
-        X_numpy = np.array(X)
-        print(X_numpy.shape)
-        transform = transforms.Compose(
-                        [transforms.ToTensor(),
-                        transforms.Resize(256),
-                        transforms.CenterCrop([256,256]),] 
-                        )
+        # X_numpy = np.array(X)
+        # print(X_numpy.shape)
+        # transform = transforms.Compose(
+        #                 [transforms.ToTensor(),
+        #                 transforms.Resize(256),
+        #                 transforms.CenterCrop([256,256]),] 
+        #                 )
         X_torch = transform(X)
-        print('troch', X_torch.shape)
+        # print('troch', X_torch.shape)
                             
                 
         if self.transform is not None:
