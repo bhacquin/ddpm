@@ -11,6 +11,7 @@ from ddpm.datasets.celebahq import CelebAHQ
 from ddpm.datasets.ffhq import FFHQ
 from ddpm.datasets.lsun import LSUN
 from ddpm.datasets.faces import Faces
+from ddpm.datasets.imagenet_train import Imagenet
 # from ddpm.datasets.audio import AudioDataset
 from ddpm.datasets.gta5 import GTA_Pretraining_Dataset
 from ddpm.datasets.imagenet import Imagenet_Dataset
@@ -115,6 +116,22 @@ def get_dataset(args, cfg):
                             )
                 )
         test_dataset = None
+
+    elif dataset_name == "IMAGENET":
+        dataset = Imagenet(
+                root=cfg.trainer.datapath,
+                split=cfg.trainer.split,
+                corruption=corruption,
+                corruption_severity=corruption_severity,
+                transform=transforms.Compose(
+                        [transforms.ToTensor(),
+                        transforms.Resize(image_size),
+                        transforms.CenterCrop([cfg.trainer.img_size,cfg.trainer.img_size]), 
+                        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+                            )
+                )
+        test_dataset = None
+
     elif dataset_name == "CELEBA":
         cx = 89
         cy = 121
@@ -273,7 +290,7 @@ def get_dataset(args, cfg):
         dataset = GTA_Pretraining_Dataset(cfg, transform = train_transform)
         test_dataset = None
     
-    elif dataset_name == "IMAGENET":
+    elif dataset_name == "IMAGENET_CORRUPTED":
         print("dataset_name :", dataset_name)
         if cfg.trainer.center_crop:
             if cfg.trainer.random_flip:
