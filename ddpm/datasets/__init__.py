@@ -119,6 +119,7 @@ def get_dataset(args, cfg):
 
     elif dataset_name == "IMAGENET":
         dataset = Imagenet(
+                cfg=cfg, 
                 root=cfg.trainer.datapath,
                 split=cfg.trainer.split,
                 corruption=corruption,
