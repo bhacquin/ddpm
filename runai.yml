@@ -1,0 +1,51 @@
+apiVersion: run.ai/v1
+kind: RunaiJob
+metadata:
+  name: faces # MUST BE SAME NAME of the "release" label under spec>templace>label bellow in order to get logs into the Run:AI dashboard
+  labels:
+    user: bastien.vandelft # GASPAR: eg megh.shukla
+spec:
+  template:
+    metadata:
+      labels:
+        user: bastien.vandelft # GASPAR: eg megh.shukla
+        release: faces # MUST BE SAME NAME of your pod "name" specify in the metadata above in order to get logs into the Run:AI dashboard
+    spec:
+      hostIPC: false
+      schedulerName: runai-scheduler
+      restartPolicy: Never
+      securityContext:
+        runAsUser: 233617 # insert uid found in people.epfl in admistrative data
+        runAsGroup: 78930 # Please ask this to me incase you don't have it already.
+        fsGroup: 78930 # Please ask this to me incase you don't have it already.
+      containers:
+      - name: ddpm
+        env:
+        - name : WANDB_API_KEY
+          value : 7054f94a0dfd9c1584b29282bae968073f5139f7        
+        image: registry.rcp.epfl.ch/vita/ddpm_bvd # Your image in Docker Hub or RCP Registry
+        workingDir : /app
+        command: ["/bin/bash", "-c"] 
+        args: ["cd  /mnt/nas3_rcp_enac_u0900_vita_scratch/vita-staff/users/bvandelft/ddpm; git pull ; python -m ddpm.train trainer=faces_hugginface_rcp"]
+        resources:
+          limits:
+            nvidia.com/gpu: 1 # NOTE: Also can be fractional :)
+        volumeMounts:
+          - mountPath: /mnt/nas3_rcp_enac_u0900_vita_scratch
+            name: scratch
+          - mountPath: /dev/shm
+            name: dshm
+#          - mountPath: /MOUNTPATH2
+#            name: VOLUME_NAME2
+      volumes:
+        - name: scratch
+          persistentVolumeClaim:
+            claimName: runai-vita-bvandelft-scratch
+        - name: dshm
+          emptryDir:
+            medium: Memory
+            sizeLimit: 2Gi
+
+#        - name: VOLUME_NAME2
+#          persistentVolumeClaim:
+#            claimName: runai-pv-VOLUME2
