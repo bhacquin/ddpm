@@ -32,18 +32,18 @@ class Imagenet(VisionDataset):
         else:
             self.split = cfg.trainer.split
         
-        if corruption is not None:
-            self.corruption = corruption
-        else:
-            self.corruption = OmegaConf.to_object(cfg.trainer.corruption)
-            if len(self.corruption) == 0:
-                print("No corruption")
-                self.corruption = None
-
-        if corruption_severity is not None:
-            self.corruption_severity = corruption_severity
-        else:
-            self.corruption_severity = OmegaConf.to_object(cfg.trainer.corruption_severity)
+        # if corruption is not None:
+        #     self.corruption = corruption
+        # else:
+        #     self.corruption = OmegaConf.to_object(cfg.trainer.corruption)
+        #     if len(self.corruption) == 0:
+        #         print("No corruption")
+        #         self.corruption = None
+# 
+        # if corruption_severity is not None:
+        #     self.corruption_severity = corruption_severity
+        # else:
+        #     self.corruption_severity = OmegaConf.to_object(cfg.trainer.corruption_severity)
 
         if transform is not None:
             self.transform = transform
