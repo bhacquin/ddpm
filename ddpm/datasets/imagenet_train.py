@@ -98,18 +98,7 @@ class Imagenet(VisionDataset):
         """
         X = PIL.Image.open(self.images[index])
         if X.mode != 'RGB':
-            X = X.convert('RGB')
-        print(X.size)
-        # X_numpy = np.array(X)
-        # print(X_numpy.shape)
-        # transform = transforms.Compose(
-        #                 [transforms.ToTensor(),
-        #                 transforms.Resize(256),
-        #                 transforms.CenterCrop([256,256]),] 
-        #                 )
-        # X_torch = transform(X)
-        # print('troch', X_torch.shape)
-                            
+            X = X.convert('RGB')                            
                 
         if self.transform is not None:
             X = self.transform(X)
