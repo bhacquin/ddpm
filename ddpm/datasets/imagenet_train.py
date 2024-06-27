@@ -100,6 +100,15 @@ class Imagenet(VisionDataset):
         print(X.size)
         X_numpy = np.array(X)
         print(X_numpy.shape)
+        transforms = transforms.Compose(
+                        [transforms.ToTensor(),
+                        transforms.Resize(image_size),
+                        transforms.CenterCrop([cfg.trainer.img_size,cfg.trainer.img_size]),] 
+                        )
+        X_torch = transform(X)
+        print('troch', X_torch.shape)
+                            
+                
         if self.transform is not None:
             X = self.transform(X)
             X_original = X
