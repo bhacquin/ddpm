@@ -102,8 +102,8 @@ class Imagenet(VisionDataset):
         print(X_numpy.shape)
         transform = transforms.Compose(
                         [transforms.ToTensor(),
-                        transforms.Resize(image_size),
-                        transforms.CenterCrop([cfg.trainer.img_size,cfg.trainer.img_size]),] 
+                        transforms.Resize(256),
+                        transforms.CenterCrop([256,256]),] 
                         )
         X_torch = transform(X)
         print('troch', X_torch.shape)
