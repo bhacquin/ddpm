@@ -107,7 +107,7 @@ class Imagenet(VisionDataset):
         #                 transforms.Resize(256),
         #                 transforms.CenterCrop([256,256]),] 
         #                 )
-        X_torch = transform(X)
+        # X_torch = transform(X)
         # print('troch', X_torch.shape)
                             
                 
