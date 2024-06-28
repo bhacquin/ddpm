@@ -234,6 +234,12 @@ class Hugginface_Trainer(BaseTrainer):
                 raise NotImplementedError
             if self.cfg.trainer.ema_model:
                 self.ema_model = copy.deepcopy(model).cuda(self.cfg.trainer.gpu)
+            
+            if self.cfg.trainer.load_model_path is not None:
+                LOG.info('Loading model .......')
+                self.ddpm = DDPMPipeline.from_pretrained(self.cfg.trainer.load_model_path).to(f"cuda:{self.cfg.trainer.gpu}")
+
+
             self.ddpm.unet = model
             self.ddpm.scheduler = DDPMScheduler(num_train_timesteps=self.cfg.trainer.ddpm_timesteps)
             self.num_timesteps = int(self.ddpm.scheduler.betas.shape[0])
