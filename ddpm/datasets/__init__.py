@@ -15,6 +15,7 @@ from ddpm.datasets.imagenet_train import Imagenet
 # from ddpm.datasets.audio import AudioDataset
 from ddpm.datasets.gta5 import GTA_Pretraining_Dataset
 from ddpm.datasets.imagenet import Imagenet_Dataset
+from ddpm.datasets.audio_image import Audio_Image
 from torch.utils.data import Subset
 import copy
 from omegaconf import DictConfig, open_dict
@@ -117,6 +118,18 @@ def get_dataset(args, cfg):
                 )
         test_dataset = None
 
+    elif dataset_name == "MAESTRO_MEL":
+        dataset = Audio_Image(
+                root=cfg.trainer.datapath,
+                split="train",
+                transform=transforms.Compose(
+                        [transforms.ToTensor(),
+                        transforms.Resize(image_size),
+                        transforms.CenterCrop([cfg.trainer.img_size,cfg.trainer.img_size]), 
+                        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+                            )
+                )
+        test_dataset = None
     elif dataset_name == "IMAGENET":
         dataset = Imagenet(
                 cfg=cfg, 
