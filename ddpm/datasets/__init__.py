@@ -121,6 +121,7 @@ def get_dataset(args, cfg):
     elif dataset_name == "MAESTRO_MEL":
         dataset = Audio_Image(
                 root=cfg.trainer.datapath,
+                cfg = cfg, 
                 split="train",
                 transform=transforms.Compose(
                         [transforms.ToTensor(),

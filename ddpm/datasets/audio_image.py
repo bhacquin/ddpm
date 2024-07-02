@@ -34,8 +34,8 @@ class Audio_Image(VisionDataset):
                  cfg = None, 
                  split="train",
                  transform=None, target_transform=None,):
-
-        super(Audio_Image, self).__init__(root="/home/bvandelft/scitas/bastien/maestro-v3.0.0")
+        
+        super(Audio_Image, self).__init__(root=root)
         self.split = split
         self.transform = transform
         self.target_transform = target_transform
