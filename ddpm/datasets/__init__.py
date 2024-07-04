@@ -128,7 +128,7 @@ def get_dataset(args, cfg):
                         transforms.Resize(image_size),
                         transforms.CenterCrop([cfg.trainer.img_size,cfg.trainer.img_size]), 
                         # transforms.Normalize((0.5), (0.5, 0.5, 0.5))]
-                            )
+                        ])
                 )
         test_dataset = None
     elif dataset_name == "IMAGENET":

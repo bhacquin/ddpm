@@ -59,9 +59,9 @@ class Audio_Image(VisionDataset):
                             n_iter = cfg.trainer.n_iter,
                             number_of_slices = cfg.trainer.number_of_slices,)
 
-        self.length = len([name for name in os.listdir(self.root) if os.path.is_wav_file(os.path.join(self.root, name))])
+        self.length = len([name for name in os.listdir(self.root) if is_wav_file(os.path.join(self.root, name))])
         print("nb of song:", self.length)
-        for name in [name for name in os.listdir(self.root) if os.path.is_wav_file(os.path.join(self.root, name))]:
+        for name in [name for name in os.listdir(self.root) if is_wav_file(os.path.join(self.root, name))]:
             self.list_of_wav_files.append(name)
         assert self.length == len(self.list_of_wav_files)
 
@@ -86,5 +86,5 @@ class Audio_Image(VisionDataset):
 
     def __len__(self):
 
-        return self.celeba_length + self.ffhq_length
+        return self.length
 
