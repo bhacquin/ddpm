@@ -186,7 +186,7 @@ class Mel(ConfigMixin, SchedulerMixin):
             self.load_audio(audio_file)
             x = [
                 np.expand_dims(
-                    np.frombuffer(self.mel.audio_slice_to_image(slice).tobytes(), dtype="uint8").reshape(
+                    np.frombuffer(self.audio_slice_to_image(slice).tobytes(), dtype="uint8").reshape(
                         (self.y_res, self.x_res)
                     )
                     / 255,
