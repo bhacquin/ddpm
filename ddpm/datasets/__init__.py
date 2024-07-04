@@ -5,7 +5,7 @@ from omegaconf import OmegaConf
 import torchvision.transforms as transforms
 import torchvision.transforms.functional as F
 from torchvision.datasets import CIFAR10
-from ddpm.datasets.cityscape import Cityscapes_Pretraining_Dataset, Cityscapes
+# from ddpm.datasets.cityscape import Cityscapes_Pretraining_Dataset, Cityscapes
 from ddpm.datasets.celeba import CelebA
 from ddpm.datasets.celebahq import CelebAHQ
 from ddpm.datasets.ffhq import FFHQ
