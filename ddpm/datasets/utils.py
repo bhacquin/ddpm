@@ -181,7 +181,7 @@ class Mel(ConfigMixin, SchedulerMixin):
 
     @torch.no_grad()
     def encode(self, audio_files, pool="average"):
-        y = []
+        # y = []
         for audio_file in audio_files:
             self.load_audio(audio_file)
             x = [
@@ -197,14 +197,14 @@ class Mel(ConfigMixin, SchedulerMixin):
             if self.number_of_slices > 0 and self.get_number_of_slices() > self.number_of_slices:
                 x = random.sample(x, self.number_of_slices)
 
-            y += [self(torch.Tensor(x))]
-            if pool == "average":
-                y[-1] = torch.mean(y[-1], dim=0)
-            elif pool == "max":
-                y[-1] = torch.max(y[-1], dim=0)
-            else:
-                assert pool is None, f"Unknown pooling method {pool}"
-        return torch.stack(y)
+            # y += [self(torch.Tensor(x))]
+            # if pool == "average":
+            #     y[-1] = torch.mean(y[-1], dim=0)
+            # elif pool == "max":
+            #     y[-1] = torch.max(y[-1], dim=0)
+            # else:
+                # assert pool is None, f"Unknown pooling method {pool}"
+        return torch.stack(x)
         
 
 
