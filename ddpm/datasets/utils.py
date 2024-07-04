@@ -204,7 +204,7 @@ class Mel(ConfigMixin, SchedulerMixin):
             #     y[-1] = torch.max(y[-1], dim=0)
             # else:
                 # assert pool is None, f"Unknown pooling method {pool}"
-        return torch.stack(x)
+        return torch.stack(torch.Tensor(x))
         
 
 
