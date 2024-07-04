@@ -74,10 +74,10 @@ class Audio_Image(VisionDataset):
         # X_original = X
 
         if self.target_transform is not None:
-            target = self.target_transform(X_original)
+            target = self.target_transform(img_slice)
         if self.transform is not None:
-            X = self.transform(X)
-            X_original = self.transform(X_original)
+            X = self.transform(img_slice)
+            X_original = self.transform(img_slice)
             
 
 
