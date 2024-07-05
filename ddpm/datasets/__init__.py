@@ -123,12 +123,12 @@ def get_dataset(args, cfg):
                 root=cfg.trainer.datapath,
                 cfg = cfg, 
                 split="train",
-                transform=transforms.Compose(
-                        [transforms.ToTensor(),
-                        transforms.Resize(image_size),
-                        transforms.CenterCrop([cfg.trainer.img_size,cfg.trainer.img_size]), 
-                        # transforms.Normalize((0.5), (0.5, 0.5, 0.5))]
-                        ])
+                transform= None, #transforms.Compose(
+                #         [transforms.ToTensor(),
+                #         transforms.Resize(image_size),
+                #         transforms.CenterCrop([cfg.trainer.img_size,cfg.trainer.img_size]), 
+                #         # transforms.Normalize((0.5), (0.5, 0.5, 0.5))]
+                #         ])
                 )
         test_dataset = None
     elif dataset_name == "IMAGENET":
