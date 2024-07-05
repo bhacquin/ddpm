@@ -69,7 +69,7 @@ class Audio_Image(VisionDataset):
     def __getitem__(self, index):
         wav_path = f"{self.root}/{self.list_of_wav_files[index]}"
         img_slice = self.mel.encode([wav_path])
-        print("Shape of output", img_slice.shape)
+        # print("Shape of output", img_slice.shape)
         # X = PIL.Image.open(img_path)
         # X_original = X
 
