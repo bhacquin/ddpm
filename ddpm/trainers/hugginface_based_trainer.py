@@ -836,10 +836,12 @@ class Hugginface_Trainer(BaseTrainer):
                 pickle.dump(ckpt_dict,open(f"{directory_base}/checkpoint_state.p",'wb'))
 
                 #run ode
+                latent_codes, _, _ = self.encode_inputs(img_tensor,clip_input = False)
                 if self.cfg.trainer.clip_input_encoding:
                     latent_codes_clipped, _, _ = self.encode_inputs(img_tensor, clip_input = True)
-                latent_codes, _, _ = self.encode_inputs(img_tensor,clip_input = False)
-                codes = [latent_codes, latent_codes_clipped]
+                    codes = [latent_codes, latent_codes_clipped]
+                else:
+                    codes = [latent_codes]
                 for clipped, code in enumerate(codes):
                     inputs = code[-2].cuda(self.cfg.trainer.gpu)
                     for t in tqdm(range(0,len(self.ddpm.scheduler.timesteps.tolist()))[::-1]):
@@ -1025,8 +1027,10 @@ class Hugginface_Trainer(BaseTrainer):
             for step, batch in enumerate(self.train_dataloader):
                 self.model.train()
                 x_0, _, indexes = batch
-                
-                x_0 = x_0 #.cuda(self.cfg.trainer.gpu)
+                if len(x_0.shape) == 5:
+                    x_0 = x_0.reshape(x_0.shape[0]*x_0.shape[1], x_0.shape[2], x_0.shape[3], x_0.shape[4])
+
+                # x_0 = x_0 #.cuda(self.cfg.trainer.gpu)
                 t = torch.randint(self.cfg.trainer.ddpm_timesteps, size=(x_0.shape[0],), device=x_0.device)
                 noise = torch.randn_like(x_0)
                 noisy_image = self.ddpm.scheduler.add_noise(x_0, noise, t)
