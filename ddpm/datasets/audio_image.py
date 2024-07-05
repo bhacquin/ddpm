@@ -78,6 +78,9 @@ class Audio_Image(VisionDataset):
         if self.transform is not None:
             X = self.transform(img_slice)
             X_original = self.transform(img_slice)
+        else:
+            X = img_slice
+            X_original = img_slice
             
 
 
