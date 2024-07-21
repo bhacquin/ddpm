@@ -31,10 +31,14 @@ def main(cfg: DictConfig) -> int:
         cfg.trainer.logdir = str(get_output_dir(cfg, cfg.trainer.sync_key))
 
     if cfg.trainer.platform == "local":
-        LOG.info(f"Output directory {cfg.trainer.logdir}/{cfg.trainer.sync_key}")
-        trainer.setup_platform()
-        trainer.setup_trainer()
-        trainer.run()
+        try:
+            LOG.info(f"Output directory {cfg.trainer.logdir}/{cfg.trainer.sync_key}")
+            trainer.setup_platform()
+            trainer.setup_trainer()
+            trainer.run()
+        except Exception as e:
+            LOG.info(f"Error: {e}")
+            print(e)
         return 0
 
     # Mode SLURM
