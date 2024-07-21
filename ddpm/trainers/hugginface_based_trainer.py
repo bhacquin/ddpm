@@ -1059,6 +1059,10 @@ class Hugginface_Trainer(BaseTrainer):
                     os.makedirs(test_dir, exist_ok=True)
                     image_grid.save(f"{test_dir}/{global_steps}.png")
                     img_grid = wandb.Image(image_grid)
+                    if self.cfg.dataset == "MAESTRO_MEL":
+                        audios = self.train_dataset.mel.image_to_audio(images)
+                        for audio in audios:
+                            self.accelerator.log({f"Audio": audio},step = global_steps)
                     self.accelerator.log({f"Generation": img_grid},step = global_steps)
 
                 # Saving
