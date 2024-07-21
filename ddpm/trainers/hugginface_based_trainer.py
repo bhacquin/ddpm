@@ -1062,6 +1062,7 @@ class Hugginface_Trainer(BaseTrainer):
                     if self.cfg.dataset == "MAESTRO_MEL":
                         audios = self.train_dataset.mel.image_to_audio(images)
                         for audio in audios:
+                            audio = wandb.Audio(audio, caption="", sample_rate=self.cfg.trainer.sample_rate)
                             self.accelerator.log({f"Audio": audio},step = global_steps)
                     self.accelerator.log({f"Generation": img_grid},step = global_steps)
 
