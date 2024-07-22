@@ -1026,7 +1026,11 @@ class Hugginface_Trainer(BaseTrainer):
             self.optimizer.zero_grad()
             for step, batch in enumerate(self.train_dataloader):
                 self.model.train()
-                x_0, _, indexes = batch
+                try:
+                    x_0, _, indexes = batch
+                except:
+                    LOG.info("Error in the batch {step} with indexes {indexes}")
+                    continue
                 if len(x_0.shape) == 5:
                     x_0 = x_0.reshape(x_0.shape[0]*x_0.shape[1], x_0.shape[2], x_0.shape[3], x_0.shape[4])
 
