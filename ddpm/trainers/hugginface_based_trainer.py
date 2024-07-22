@@ -861,7 +861,7 @@ class Hugginface_Trainer(BaseTrainer):
                         else:
                             save_image(sample.cpu()/ 2 + 0.5, f"{index_directory[k]}/reconstruction/non_clipped/reconstruction_ddim.png")
 
-                for latent in range(ode_range[0], ode_range[1], ode_range[2]):
+                for depth_latent, latent in enumerate(range(ode_range[0], ode_range[1], ode_range[2])):
                     for clipped, code in enumerate(codes):
                         LOG.info(f"Using clipped {clipped}")
                         if self.cfg.trainer.gpu == 0:
@@ -874,6 +874,8 @@ class Hugginface_Trainer(BaseTrainer):
                             for l, epsilon in enumerate(epsilons):
                                 if l >= current_epsilon or self.cfg.trainer.run_all_epsilon:
                                     current_epsilon = l
+                                    if depth_latent > 0:
+                                        epsilon = epsilon * 0.1
                                     with torch.no_grad():
                                         if clipped:
                                             start_from_latent = self.cfg.trainer.start_from_latent
