@@ -1065,11 +1065,11 @@ class Hugginface_Trainer(BaseTrainer):
                     img_grid = wandb.Image(image_grid)
                     if self.cfg.trainer.dataset == "MAESTRO_MEL":
                         print('logging audio')
-                        for image in images:
+                        for audio_index, image in enumerate(images):
                             audio = self.train_dataset.mel.image_to_audio(image)
                             audio = wandb.Audio(audio, caption="", sample_rate=self.cfg.trainer.sample_rate)
-                            self.accelerator.log({f"Audio": audio},step = global_steps)
-                    self.accelerator.log({f"Generation": img_grid},step = global_steps)
+                            self.accelerator.log({f"Audio": audio},step = global_steps+audio_index, commit=False)
+                    self.accelerator.log({f"Generation": img_grid},step = global_steps, commit=False)
 
                 # Saving
                 if (global_steps+1) % self.cfg.trainer.save_model_steps == 0:
