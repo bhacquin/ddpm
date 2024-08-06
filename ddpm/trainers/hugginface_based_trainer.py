@@ -236,8 +236,11 @@ class Hugginface_Trainer(BaseTrainer):
                 self.ema_model = copy.deepcopy(model).cuda(self.cfg.trainer.gpu)
             self.ddpm.unet = model
             if self.cfg.trainer.load_model_path is not None:
-                LOG.info('Loading model .......')
-                self.ddpm = DDPMPipeline.from_pretrained(self.cfg.trainer.load_model_path).to(f"cuda:{self.cfg.trainer.gpu}")
+                try:
+                    LOG.info('Loading model .......')
+                    self.ddpm = DDPMPipeline.from_pretrained(self.cfg.trainer.load_model_path).to(f"cuda:{self.cfg.trainer.gpu}")
+                except:
+                    LOG.info('No model to be loaded ......')
 
 
             
