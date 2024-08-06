@@ -100,13 +100,23 @@ def get_dataset(args, cfg):
                         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
                             )
                 )
-        test_dataset = None
+        test_dataset = CelebAHQ(
+                root=datapath,
+                split="test",
+                corruption=corruption,
+                corruption_severity=corruption_severity,
+                transform=transforms.Compose(
+                        [transforms.ToTensor(),
+                        transforms.Resize(image_size),
+                        transforms.CenterCrop([cfg.trainer.img_size,cfg.trainer.img_size]), 
+                        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+                            )
 
     elif dataset_name == "FACES":
         dataset = Faces(
                 celeba_root=cfg.trainer.celeba_root,
                 ffhq_root=cfg.trainer.ffhq_root,
-                split="train",
+                split="all",
                 corruption=corruption,
                 corruption_severity=corruption_severity,
                 transform=transforms.Compose(

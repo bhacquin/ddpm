@@ -37,6 +37,7 @@ class CelebAHQ(VisionDataset):
 
     def __init__(self, root = "/mnt/scitas/bastien/CelebAMask-HQ/CelebA-HQ-img",
                  split="train",
+                 test_split=0.1,
                  transform=None, target_transform=None,
                  corruption=None,
                 #  datapath = "/mnt/scitas/bastien/CelebAMask-HQ/CelebA-HQ-img",
@@ -44,20 +45,27 @@ class CelebAHQ(VisionDataset):
         import pandas
         super(CelebAHQ, self).__init__(root)
         self.split = split
+        if self.split is None:
+            self.split = "all"
         self.corruption = corruption
         self.corruption_severity = corruption_severity
         self.transform = transform
         self.target_transform = target_transform
         self.root = root
-        self.length = len([name for name in os.listdir(self.root) if os.path.isfile(os.path.join(self.root, name))])
-        
-
-        
-        # mask = (splits[1] == split)
-        # self.filename = splits[mask].index.values
+        self.all_length = len([name for name in os.listdir(self.root) if os.path.isfile(os.path.join(self.root, name))])
+        if self.split == "all" :
+            self.length = self.all_length
+        elif self.split == 'train':
+            self.length = int((1-test_split)*self.all_length)
+        elif self.split == 'test':
+            self.length = int(test_split*self.all_length)
 
     def __getitem__(self, index):
-        img_path = f"{self.root}/{index}.jpg"
+        if self.split == "train" or self.split == "all":
+            img_path = f"{self.root}/{index}.jpg"
+        elif self.split == "test":
+            new_index = self.all_length - index
+            img_path = f"{self.root}/{new_index}.jpg"
         X = PIL.Image.open(img_path)
         X_original = X
         
