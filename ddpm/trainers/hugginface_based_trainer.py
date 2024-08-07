@@ -240,6 +240,7 @@ class Hugginface_Trainer(BaseTrainer):
                     LOG.info('Loading model .......')
                     self.ddpm = DDPMPipeline.from_pretrained(self.cfg.trainer.load_model_path).to(f"cuda:{self.cfg.trainer.gpu}")
                 except Exception as e:
+                    print(f"ls : {os.listdir(self.cfg.trainer.load_model_path)}")
                     LOG.info(f"{e}")
                     LOG.info('No model to be loaded ......')
 
