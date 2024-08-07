@@ -111,6 +111,7 @@ def get_dataset(args, cfg):
                         transforms.CenterCrop([cfg.trainer.img_size,cfg.trainer.img_size]), 
                         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
                             )
+        )
 
     elif dataset_name == "FACES":
         dataset = Faces(
