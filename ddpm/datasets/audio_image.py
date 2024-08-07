@@ -33,6 +33,7 @@ class Audio_Image(VisionDataset):
     def __init__(self, root = "/home/bvandelft/rcp/scratch/datasets/maestro-v3.0.0/maestro_full",
                  cfg = None, 
                  split="train",
+                 test_split=0.1,
                  transform=None, target_transform=None,):
         
         super(Audio_Image, self).__init__(root=root)
@@ -59,10 +60,24 @@ class Audio_Image(VisionDataset):
                             n_iter = cfg.trainer.n_iter,
                             number_of_slices = cfg.trainer.number_of_slices,)
 
-        self.length = len([name for name in os.listdir(self.root) if is_wav_file(os.path.join(self.root, name))])
+        self.all_length = len([name for name in os.listdir(self.root) if is_wav_file(os.path.join(self.root, name))])
+        if self.split == "all" :
+            self.length = self.all_length
+        elif self.split == 'train':
+            self.length = int((1-test_split)*self.all_length)
+        elif self.split == 'test':
+            self.length = int(test_split*self.all_length)
+        else:
+            print("Assuming to take the whole dataset")
+            self.split = "all"
         print("nb of song:", self.length)
-        for name in [name for name in os.listdir(self.root) if is_wav_file(os.path.join(self.root, name))]:
-            self.list_of_wav_files.append(name)
+        for k, name in enumerate([name for name in os.listdir(self.root) if is_wav_file(os.path.join(self.root, name))]):
+            if self.split == 'train' and k < self.length:
+                self.list_of_wav_files.append(name)
+            elif self.split == "test" and k >= self.all_length - self.length:
+                self.list_of_wav_files.append(name)
+            elif self.split == 'all':
+                self.list_of_wav_files.append(name)
         assert self.length == len(self.list_of_wav_files)
 
 
