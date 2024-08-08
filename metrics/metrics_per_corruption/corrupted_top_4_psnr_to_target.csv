@@ -1,0 +1,2 @@
+,corruption,psnr_to_input,psnr_to_target,ssim_to_input,ssim_to_target,l2_to_input,l2_to_target,lpips_to_input,lpips_to_target,fid,num_imgs
+0,voronoi_noise,inf,16.97894287109375,1.0,0.6669482588768005,0.0,62.234806060791016,0.0,0.16138426959514618,160.49114990234375,34
